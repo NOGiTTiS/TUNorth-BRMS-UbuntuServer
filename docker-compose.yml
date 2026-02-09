@@ -1,0 +1,76 @@
+services:
+  # Database Service
+  db:
+    image: postgres:17-alpine
+    container_name: tunorth_db
+    restart: always
+    environment:
+      - POSTGRES_USER=admin
+      - POSTGRES_PASSWORD=password123
+      - POSTGRES_DB=tunorth-brms_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+
+  # PgAdmin Service (Database GUI)
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: tunorth_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: root
+    ports:
+      - "5050:80"
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  # Backend Service (Go)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tunorth_backend
+    restart: always
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USER=admin
+      - DB_PASSWORD=password123
+      - DB_NAME=tunorth-brms_db
+      - PORT=8080
+      # Add other environment variables as needed
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  # Frontend Service (Next.js)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: tunorth_frontend
+    restart: always
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8080 # Adjust for production domain
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - app-network
+
+volumes:
+  db_data:
+
+networks:
+  app-network:
+    driver: bridge
