@@ -60,10 +60,27 @@ services:
     container_name: tunorth_frontend
     restart: always
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8080 # Adjust for production domain
-    ports:
-      - "3000:3000"
+      # Use relative path because Nginx will handle the routing from the browser
+      - NEXT_PUBLIC_API_URL=/api
+    # Expose port 3000 only to internal network, not host machine (Nginx handles ingress)
+    expose:
+      - "3000"
     depends_on:
+      - backend
+    networks:
+      - app-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: tunorth_nginx
+    restart: always
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
       - backend
     networks:
       - app-network
