@@ -44,9 +44,7 @@ func (s *userService) CreateUser(user *domain.User) error {
 	}
 
 	// 4. Log
-	go s.logService.LogAction(0, "CREATE_USER", fmt.Sprintf("Created user: %s", user.Username), "", "")
-	// Note: We don't have actorID here yet. I need to refactor.
-	// For now, I will pause this edit and check ports.
+	go s.logService.LogAction(user.ID, "CREATE_USER", fmt.Sprintf("Created user: %s", user.Username), "", "")
 	return nil
 }
 

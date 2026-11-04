@@ -46,7 +46,7 @@ interface ReportStats {
 
 export default function ReportPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isInitialized } = useAuthStore();
+  const { user, token, isAuthenticated, isInitialized } = useAuthStore();
 
   // Dates: Default to current month
   const now = new Date();
@@ -78,7 +78,9 @@ export default function ReportPage() {
         end: endDate,
         status: status === "all" ? "" : status,
       });
-      const res = await fetch(`${API_URL}/api/reports/dashboard?${query}`);
+      const res = await fetch(`${API_URL}/api/reports/dashboard?${query}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (res.ok) {
         const data = await res.json();
         setStats(data);
@@ -91,8 +93,10 @@ export default function ReportPage() {
   };
 
   useEffect(() => {
-    fetchStats();
-  }, []); // Initial load
+    if (isAuthenticated && user?.role === "admin") {
+      fetchStats();
+    }
+  }, [isAuthenticated, user, token]);
 
   const handleExportCSV = () => {
     if (!stats) return;

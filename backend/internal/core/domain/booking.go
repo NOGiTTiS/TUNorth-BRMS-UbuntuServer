@@ -28,6 +28,10 @@ type Booking struct {
 	ApproverID     *uint          `json:"approver_id"`
 	Approver       *User          `gorm:"foreignKey:ApproverID" json:"approver"`
 	RejectReason   string         `json:"reject_reason"`
+	RecurringGroupID *string      `gorm:"index;size:64" json:"recurring_group_id"`
+	RecurrenceType   string       `gorm:"size:32;default:'none'" json:"recurrence_type"`
+	RecurrenceIndex  int          `gorm:"default:1" json:"recurrence_index"`
+	RecurrenceTotal  int          `gorm:"default:1" json:"recurrence_total"`
 	BookingResources []BookingResource `gorm:"foreignKey:BookingID" json:"booking_resources"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`

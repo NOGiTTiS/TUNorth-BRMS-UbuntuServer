@@ -1,93 +1,38 @@
 services:
-  # Database Service
-  db:
-    image: postgres:17-alpine
-    container_name: tunorth_db
-    restart: always
-    environment:
-      - POSTGRES_USER=admin
-      - POSTGRES_PASSWORD=password123
-      - POSTGRES_DB=tunorth-brms_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - db_data:/var/lib/postgresql/data
-    networks:
-      - app-network
-
-  # PgAdmin Service (Database GUI)
-  pgadmin:
-    image: dpage/pgadmin4
-    container_name: tunorth_pgadmin
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: root
-    ports:
-      - "5050:80"
-    depends_on:
-      - db
-    networks:
-      - app-network
-
-  # Backend Service (Go)
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: tunorth_backend
+    build: ./backend
+    container_name: brms-backend
     restart: always
-    environment:
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_USER=admin
-      - DB_PASSWORD=password123
-      - DB_NAME=tunorth-brms_db
-      - PORT=8080
-      # Add other environment variables as needed
-    ports:
-      - "8080:8080"
-    depends_on:
-      - db
     networks:
-      - app-network
+      - tunorth-net
+    volumes:
+      - ../../data/uploads/brms:/app/uploads
+    environment:
+      - DB_HOST=${DB_HOST:-brms-db}
+      - DB_USER=${DB_USER:-postgres}
+      - DB_PASSWORD=${DB_PASSWORD:-hVLcvCI17kc.r6XZ}
+      - DB_NAME=${DB_NAME:-tunorth-brms_db}
+      - DB_PORT=${DB_PORT:-5432}
+      - PORT=8080
+      - ALLOW_ORIGINS=${ALLOW_ORIGINS:-*}
+      - JWT_SECRET=${JWT_SECRET:-tunorth-brms-jwt-super-secret-key-2026}
+      - DB_SSL=disable
 
-  # Frontend Service (Next.js)
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    container_name: tunorth_frontend
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
+    container_name: brms-frontend
     restart: always
+    networks:
+      - tunorth-net
     environment:
-      # Use relative path because Nginx will handle the routing from the browser
-      - NEXT_PUBLIC_API_URL=/api
-    # Expose port 3000 only to internal network, not host machine (Nginx handles ingress)
-    expose:
-      - "3000"
+      - API_INTERNAL_URL=http://brms-backend:8080
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-}
     depends_on:
       - backend
-    networks:
-      - app-network
-
-  # Nginx Reverse Proxy
-  nginx:
-    image: nginx:alpine
-    container_name: tunorth_nginx
-    restart: always
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - frontend
-      - backend
-    networks:
-      - app-network
-
-volumes:
-  db_data:
 
 networks:
-  app-network:
-    driver: bridge
+  tunorth-net:
+    external: true

@@ -36,10 +36,38 @@ func (h *SettingHandler) GetPublicSettings(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
-	// Return map for easy access: { "site_name": "...", "logo": "..." }
-	// Filter strict secrets if needed
-	delete(dict, "telegram_bot_token") // ซ่อน Token
-	return c.JSON(dict)
+
+	// Whitelist allowed public keys to strictly prevent leaking secrets
+	allowedKeys := map[string]bool{
+		"site_name":              true,
+		"site_description":       true,
+		"copyright_text":         true,
+		"institute_name":         true,
+		"enable_register":        true,
+		"site_logo":              true,
+		"favicon":                true,
+		"theme_color":            true,
+		"theme_color_secondary":  true,
+		"bg_color_start":         true,
+		"bg_color_end":           true,
+		"default_booking_status": true,
+		"advance_booking_days":   true,
+		"allow_weekend":          true,
+		"max_recurring_count":    true,
+		"popup_enabled":          true,
+		"popup_image":            true,
+		"popup_link":             true,
+		"site_url":               true,
+	}
+
+	publicDict := make(map[string]interface{})
+	for k, v := range dict {
+		if allowedKeys[k] {
+			publicDict[k] = v
+		}
+	}
+
+	return c.JSON(publicDict)
 }
 
 // PUT /api/settings
@@ -113,7 +141,7 @@ func (h *SettingHandler) UploadImage(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save file"})
 	}
 
-	// คืนค่า URL (Localhost)
-	fullURL := fmt.Sprintf("http://localhost:8080/uploads/%s", fileName)
+	// คืนค่า URL (Relative Path เพื่อรองรับทุก Domain และ LAN IP)
+	fullURL := fmt.Sprintf("/uploads/%s", fileName)
 	return c.JSON(fiber.Map{"url": fullURL})
 }

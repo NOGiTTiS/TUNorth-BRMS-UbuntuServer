@@ -14,8 +14,12 @@ func NewLogService(repo ports.LogRepository) ports.LogService {
 }
 
 func (s *logService) LogAction(userID uint, action, description, ip, userAgent string) error {
+	var uid *uint
+	if userID > 0 {
+		uid = &userID
+	}
 	log := &domain.Log{
-		UserID:      userID,
+		UserID:      uid,
 		Action:      action,
 		Description: description,
 		IPAddress:   ip,

@@ -87,6 +87,18 @@ export default function BookingDetailModal({
         </DialogHeader>
 
         <div className="space-y-4 py-2 overflow-y-auto px-1">
+          {booking.recurring_group_id && (
+            <div className="grid grid-cols-3 gap-2 text-sm bg-purple-50/70 p-3 rounded-xl border border-purple-100">
+              <div className="font-bold text-purple-900">รูปแบบการจอง:</div>
+              <div className="col-span-2 text-purple-800 font-medium">
+                {booking.recurrence_type === "weekly"
+                  ? "จองซ้ำรายสัปดาห์"
+                  : "จองหลายวันเวลาเดียวกัน"}{" "}
+                (ครั้งที่ {booking.recurrence_index} จากทั้งหมด{" "}
+                {booking.recurrence_total} ครั้ง)
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-2 text-sm">
             <div className="font-bold text-slate-700">ห้องประชุม:</div>
             <div className="col-span-2 text-slate-900 flex items-center gap-2">
@@ -149,8 +161,25 @@ export default function BookingDetailModal({
           {/* เพิ่มส่วนแสดงอุปกรณ์ แยกออกมา */}
           <div className="grid grid-cols-3 gap-2 text-sm">
             <div className="font-bold text-slate-700">อุปกรณ์ที่ต้องการ:</div>
-            <div className="col-span-2 text-slate-900">
-              {booking.resource_text || "-"}
+            <div className="col-span-2 text-slate-900 flex flex-col">
+              {/* แสดงอุปกรณ์ที่เลือกจาก Checkbox */}
+              {booking.booking_resources && booking.booking_resources.length > 0 ? (
+                <span>
+                  {booking.booking_resources.map((br: any) => br.resource?.resource_name).filter(Boolean).join(', ')}
+                </span>
+              ) : null}
+              
+              {/* แสดงข้อความที่พิมพ์เพิ่มเติม (ถ้ามี) */}
+              {booking.resource_text && (
+                <span className={booking.booking_resources && booking.booking_resources.length > 0 ? "mt-1" : ""}>
+                  {booking.resource_text}
+                </span>
+              )}
+
+              {/* ถ้าไม่มีทั้งคู่ให้แสดง - */}
+              {(!booking.booking_resources || booking.booking_resources.length === 0) && !booking.resource_text && (
+                <span>-</span>
+              )}
             </div>
           </div>
 

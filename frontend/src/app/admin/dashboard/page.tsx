@@ -4,27 +4,17 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { useSettings } from "@/hooks/useSettings";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
-import {
-  LogOut,
-  Plus,
-  Users,
-  DoorOpen,
-  CalendarCheck,
-  CheckCircle,
-} from "lucide-react";
 import { API_URL } from "@/config";
 
 export default function AdminDashboard() {
   const router = useRouter();
-  const { user, logout, isAuthenticated, isInitialized } = useAuthStore();
+  const { user, token, isAuthenticated, isInitialized } = useAuthStore();
   const { fetchSettings, get } = useSettings();
   const [stats, setStats] = useState({
     totalBookings: 0,
@@ -37,10 +27,12 @@ export default function AdminDashboard() {
   );
   const [loading, setLoading] = useState(true);
 
-  // Helper to fetch count
+  // Helper to fetch count with authorization header
   const fetchCount = async (url: string) => {
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (res.ok) {
         const data = await res.json();
         return Array.isArray(data) ? data : [];
@@ -52,13 +44,13 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
-    if (!isInitialized) return; // Wait for init
+    if (!isInitialized) return;
     if (!isAuthenticated) {
       router.push("/");
       return;
     }
 
-    fetchSettings(); // Fetch settings
+    fetchSettings();
 
     const loadStats = async () => {
       // Parallel Fetch
@@ -76,9 +68,6 @@ export default function AdminDashboard() {
       // Calculate Monthly Data (Current Year)
       const currentYear = new Date().getFullYear();
       const months = new Array(12).fill(0);
-
-      console.log("Current Year:", currentYear);
-      console.log("Bookings:", bookings);
 
       bookings.forEach((b: any) => {
         const dateStr = b.start_time || b.StartTime;
@@ -101,7 +90,7 @@ export default function AdminDashboard() {
     };
 
     loadStats();
-  }, [isAuthenticated, user, router]);
+  }, [isAuthenticated, user, router, token, isInitialized]);
 
   const monthNames = [
     "January",
@@ -120,7 +109,7 @@ export default function AdminDashboard() {
 
   /* Simple Bar Chart Component */
   const BarChart = ({ data }: { data: number[] }) => {
-    const maxVal = Math.max(...data, 10); // Minimum scale of 10
+    const maxVal = Math.max(...data, 10);
 
     return (
       <div className="w-full h-80 flex items-end gap-2 md:gap-4 pt-8 pb-6 px-4 bg-slate-50">
@@ -141,7 +130,7 @@ export default function AdminDashboard() {
                 className="w-full max-w-[40px] rounded-t-sm transition-all duration-500 ease-out opacity-80 hover:opacity-100"
                 style={{
                   height: `${heightPercent}%`,
-                  backgroundColor: get("theme_color", "#D81B60"), // Use dynamic color
+                  backgroundColor: get("theme_color", "#D81B60"),
                 }}
               ></div>
 
@@ -165,12 +154,12 @@ export default function AdminDashboard() {
 
   return (
     <div className="container mx-auto py-8 px-4 font-sans space-y-8">
-      {/* 2. Header Area: ภาพรวมระบบ + Buttons */}
+      {/* Header Area */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-slate-800">ภาพรวมระบบ</h1>
       </div>
 
-      {/* 3. Stats Cards */}
+      {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
         {/* Card 1: Total Bookings */}
         <Card className="rounded-2xl border-none bg-slate-50 shadow-sm shadow-slate-200">
@@ -200,8 +189,7 @@ export default function AdminDashboard() {
             <div className="flex items-baseline gap-2">
               <span className="text-4xl font-bold text-yellow-500">
                 {stats.approvedBookings}
-              </span>{" "}
-              {/* Yellow matching example approximately, or use brand color */}
+              </span>
               <span className="text-sm text-slate-400">รายการ</span>
             </div>
           </CardContent>
@@ -242,7 +230,7 @@ export default function AdminDashboard() {
         </Card>
       </div>
 
-      {/* 4. Chart Section */}
+      {/* Chart Section */}
       <Card className="rounded-3xl border border-slate-100 bg-slate-50 shadow-sm overflow-hidden">
         <CardHeader className="pb-0 pt-6 px-6">
           <CardTitle className="text-lg font-bold text-slate-800">
@@ -250,12 +238,10 @@ export default function AdminDashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {/* Chart Wrapper with Grid Lines Background (Optional simple CSS grid) */}
           <div className="relative w-full overflow-x-auto">
             <div className="min-w-[500px]">
               <BarChart data={monthlyData} />
             </div>
-            {/* Debug Info (Hidden in prod) */}
             <div className="text-[10px] text-slate-300 text-center mt-2">
               Data Year: {new Date().getFullYear()} | Total in Chart:{" "}
               {monthlyData.reduce((a, b) => a + b, 0)}

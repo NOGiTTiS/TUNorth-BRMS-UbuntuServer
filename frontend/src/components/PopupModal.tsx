@@ -61,7 +61,7 @@ export default function PopupModal() {
                 onClick={() => window.open(link, "_blank")}
                 className="w-full bg-tu-pink hover:bg-tu-pink-hover text-white rounded-full font-bold shadow-lg shadow-tu-pink/20"
               >
-                ดูรายละเอียดเพิ่มเติม
+                ประเมินความพึงพอใจ
               </Button>
             )}
             <Button

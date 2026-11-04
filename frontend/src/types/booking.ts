@@ -13,7 +13,14 @@ export interface Booking {
   attendees?: number;
   note?: string;
   resource_text?: string; 
+  booking_resources?: any[];
   layout_image?: string;
+  
+  // Recurrence / Grouping
+  recurring_group_id?: string;
+  recurrence_type?: string;
+  recurrence_index?: number;
+  recurrence_total?: number;
   
   // Relations
   room_id: number;

@@ -17,6 +17,40 @@ func NewUserHandler(service ports.UserService) *UserHandler {
 	return &UserHandler{service: service}
 }
 
+// POST /api/users
+func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
+	type CreateUserRequest struct {
+		Username   string `json:"username"`
+		Password   string `json:"password"`
+		FullName   string `json:"full_name"`
+		Department string `json:"department"`
+		Role       string `json:"role"`
+		Email      string `json:"email"`
+		Tel        string `json:"tel"`
+	}
+
+	var req CreateUserRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
+	}
+
+	user := domain.User{
+		Username:   req.Username,
+		Password:   req.Password,
+		FullName:   req.FullName,
+		Department: req.Department,
+		Role:       req.Role,
+		Email:      req.Email,
+		Tel:        req.Tel,
+	}
+
+	if err := h.service.CreateUser(&user); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"message": "User created successfully"})
+}
+
 // GET /api/users
 func (h *UserHandler) GetAllUsers(c *fiber.Ctx) error {
 	users, err := h.service.GetAllUsers()
@@ -33,9 +67,27 @@ func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID"})
 	}
 
-	var user domain.User
-	if err := c.BodyParser(&user); err != nil {
+	type UpdateUserRequest struct {
+		FullName   string `json:"full_name"`
+		Department string `json:"department"`
+		Tel        string `json:"tel"`
+		Email      string `json:"email"`
+		Role       string `json:"role"`
+		Password   string `json:"password"`
+	}
+
+	var req UpdateUserRequest
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
+	}
+
+	user := domain.User{
+		FullName:   req.FullName,
+		Department: req.Department,
+		Tel:        req.Tel,
+		Email:      req.Email,
+		Role:       req.Role,
+		Password:   req.Password,
 	}
 
 	if err := h.service.UpdateUser(uint(id), &user); err != nil {

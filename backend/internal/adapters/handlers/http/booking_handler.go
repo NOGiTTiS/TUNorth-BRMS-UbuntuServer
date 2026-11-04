@@ -1,6 +1,7 @@
 package http
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -22,11 +23,10 @@ func NewBookingHandler(service ports.BookingService, settingService ports.Settin
 }
 
 // [GET] /api/bookings?start=...&end=...
-// ในฟังก์ชัน GetBookings
 func (h *BookingHandler) GetBookings(c *fiber.Ctx) error {
 	start := c.Query("start")
 	end := c.Query("end")
-	userIdStr := c.Query("user_id") // รับค่ามาเป็น string ก่อน
+	userIdStr := c.Query("user_id")
 
 	// 1. กรณีดึงข้อมูลปฏิทิน (กรองตามวันที่ start/end)
 	if start != "" && end != "" {
@@ -58,14 +58,11 @@ func (h *BookingHandler) GetBookings(c *fiber.Ctx) error {
 
 	// 3. กรณีดูประวัติส่วนตัว (กรองตาม User ID)
 	if userIdStr != "" {
-		// แปลง user_id จาก string เป็น int
 		targetID, err := strconv.Atoi(userIdStr)
 		if err != nil {
-			// ถ้าส่งมาไม่ใช่ตัวเลข ให้แจ้ง error กลับไป
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid user_id format"})
 		}
 
-		// สร้าง slice ใหม่เพื่อเก็บเฉพาะของ User คนนั้น
 		var myBookings []domain.Booking
 		for _, b := range bookings {
 			if int(b.UserID) == targetID {
@@ -76,8 +73,7 @@ func (h *BookingHandler) GetBookings(c *fiber.Ctx) error {
 	}
 
 	// 4. กรณี Admin หรือไม่ส่งอะไรมาเลย -> คืนค่าทั้งหมด
-	// Filter by status if provided
-    statusFilter := c.Query("status")
+	statusFilter := c.Query("status")
 	if statusFilter != "" {
 		var filtered []domain.Booking
 		for _, b := range bookings {
@@ -93,55 +89,69 @@ func (h *BookingHandler) GetBookings(c *fiber.Ctx) error {
 
 // POST /api/bookings (รองรับ File Upload)
 func (h *BookingHandler) CreateBooking(c *fiber.Ctx) error {
-	// 1. รับค่าจาก Form Data (ไม่ใช่ JSON แล้ว)
-	// เราต้องแปลง string เป็น type ที่ถูกต้องเอง
+	// ดึง User จาก JWT Token เสมอเพื่อความปลอดภัย
+	userCtx := c.Locals("user")
+	if userCtx == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	userToken, ok := userCtx.(*jwt.Token)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token format"})
+	}
+
+	claims, ok := userToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
+	}
+
+	tokenUserID := uint(claims["user_id"].(float64))
+	userRole, _ := claims["role"].(string)
+
 	roomID, _ := strconv.Atoi(c.FormValue("room_id"))
 	attendees, _ := strconv.Atoi(c.FormValue("attendees"))
 	
 	// แปลงเวลา (Time string -> Time object)
-	layout := "2006-01-02T15:04:05.000Z" // Format ISO8601
+	layout := "2006-01-02T15:04:05.000Z"
 	startTime, _ := time.Parse(layout, c.FormValue("start_time"))
 	endTime, _ := time.Parse(layout, c.FormValue("end_time"))
 
-	// สร้าง Object Booking
-	booking := domain.Booking{
-		// UserID จะรับจาก Form หรือ Token ก็ได้ (ในที่นี้รับจาก Form เพื่อความง่ายตาม Code เดิม)
-		UserID:      uint(1), // Default ไว้ก่อน หรือแปลง c.FormValue("user_id")
-		RoomID:      uint(roomID),
-		Subject:     c.FormValue("subject"),
-		Department:  c.FormValue("department"),
-		Phone:       c.FormValue("phone"),
-		Attendees:   attendees,
-		StartTime:   startTime,
-		EndTime:     endTime,
-		Note:        c.FormValue("note"),
-		ResourceText: c.FormValue("resource_text"),
-		Status:      "pending",
-	}
-	
-	// แก้ UserID ให้ถูกต้อง (ถ้าส่งมา)
-	if uid, err := strconv.Atoi(c.FormValue("user_id")); err == nil {
-		booking.UserID = uint(uid)
+	assignedUserID := tokenUserID
+	// เฉพาะ Admin เท่านั้นที่สามารถระบุ user_id อื่นเพื่อจองแทนคนอื่นได้
+	if userRole == "admin" {
+		if uid, err := strconv.Atoi(c.FormValue("user_id")); err == nil && uid > 0 {
+			assignedUserID = uint(uid)
+		}
 	}
 
-	// 2. จัดการไฟล์อัปโหลด (Layout Image)
+	booking := domain.Booking{
+		UserID:       assignedUserID,
+		RoomID:       uint(roomID),
+		Subject:      c.FormValue("subject"),
+		Department:   c.FormValue("department"),
+		Phone:        c.FormValue("phone"),
+		Attendees:    attendees,
+		StartTime:    startTime,
+		EndTime:      endTime,
+		Note:         c.FormValue("note"),
+		ResourceText: c.FormValue("resource_text"),
+		Status:       "pending",
+	}
+
+	// จัดการไฟล์อัปโหลด (Layout Image)
 	file, err := c.FormFile("layout_image")
 	if err == nil {
-		// Retrieve Cloudinary Settings
 		cloudName := h.settingService.GetSettingValue("cloudinary_cloud_name")
 		apiKey := h.settingService.GetSettingValue("cloudinary_api_key")
 		apiSecret := h.settingService.GetSettingValue("cloudinary_api_secret")
 
-		// Check if Cloudinary is configured
 		if cloudName != "" && apiKey != "" && apiSecret != "" {
 			adapter, err := storage.NewCloudinaryAdapter(cloudName, apiKey, apiSecret)
 			if err == nil {
-				// Upload to Cloudinary
 				url, err := adapter.Upload(file, fmt.Sprintf("booking_%d", time.Now().UnixNano()))
 				if err == nil {
 					booking.LayoutImage = url
 				} else {
-					// Join error if upload fails, or fallback? For safety let's return error
 					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Cloudinary Upload Failed: " + err.Error()})
 				}
 			} else {
@@ -149,22 +159,18 @@ func (h *BookingHandler) CreateBooking(c *fiber.Ctx) error {
 			}
 		} else {
 			// Fallback: Local Storage
-			// ถ้ามีการส่งไฟล์มา
-			// ตั้งชื่อไฟล์ใหม่กันซ้ำ (เช่น booking_timestamp.jpg)
 			filename := fmt.Sprintf("booking_%d_%s", time.Now().Unix(), file.Filename)
 			path := fmt.Sprintf("./uploads/%s", filename)
 
-			// บันทึกลงเครื่อง
 			if err := c.SaveFile(file, path); err != nil {
 				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save file"})
 			}
 
-			// บันทึก Path ลง DB (เพื่อให้ Frontend เรียกใช้ได้)
 			booking.LayoutImage = "/uploads/" + filename
 		}
 	}
 
-	// 3. เรียก Service บันทึกข้อมูล
+	// เรียก Service บันทึกข้อมูล
 	if err := h.service.CreateBooking(&booking); err != nil {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
 	}
@@ -179,7 +185,6 @@ func (h *BookingHandler) UpdateStatus(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID"})
 	}
 
-	// รับค่า status จาก Body เช่น { "status": "approved" }
 	var input struct {
 		Status string `json:"status"`
 	}
@@ -187,16 +192,25 @@ func (h *BookingHandler) UpdateStatus(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
 	}
 
-	// ตรวจสอบว่า status ถูกต้องไหม
 	if input.Status != "approved" && input.Status != "rejected" && input.Status != "pending" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid status"})
 	}
 
-	// ดึง User ID ของคนกด (Admin) จาก Token
-	// (ใน Workshop นี้เราสมมติว่า Middleware แปะ user_id มาให้ หรือเราจะใช้จาก Claims ก็ได้)
-	// เพื่อความง่ายตอนนี้เราจะ Hardcode หรือดึงจาก Token ถ้าทำ Middleware แล้ว
-	// สมมติ admin_id = 1 ไปก่อนสำหรับการทดสอบ
-	adminID := uint(1)
+	// ดึง User ID ของคนกดจาก Token จริง
+	userCtx := c.Locals("user")
+	if userCtx == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+	userToken, ok := userCtx.(*jwt.Token)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token format"})
+	}
+	claims, ok := userToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
+	}
+
+	adminID := uint(claims["user_id"].(float64))
 
 	if err := h.service.UpdateBookingStatus(uint(id), input.Status, adminID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
@@ -207,107 +221,392 @@ func (h *BookingHandler) UpdateStatus(c *fiber.Ctx) error {
 
 // PUT /api/bookings/:id
 func (h *BookingHandler) UpdateBooking(c *fiber.Ctx) error {
-    id, err := c.ParamsInt("id")
-    if err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID"})
-    }
-
-    var input struct {
-        Subject   string    `json:"subject"`
-        RoomID    uint      `json:"room_id"` // Note: JSON uses string for uint in some cases, but here assumes number
-        StartTime time.Time `json:"start_time"`
-        EndTime   time.Time `json:"end_time"`
-        Note      string    `json:"note"`
-    }
-
-    if err := c.BodyParser(&input); err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
-    }
-
-    if input.Subject == "" {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Subject cannot be empty"})
-    }
-    
-    // Manual mapping or use domain.Booking directly if body matches
-    // Note: The frontend sends JSON with room_id as string? Check BookingEditModal
-    // BookingEditModal sends: room_id (string), start_time (ISO string)
-    // Go Fiber BodyParser handles ISO string to time.Time automatically? Yes usually.
-    // But room_id string to uint might fail if strict.
-    // Let's use flexible struct or check frontend.
-    // Frontend sends room_id as string. Backend expects uint or int.
-    // Fiber parser is smart enough usually, but let's be safe.
-    // Actually, `c.BodyParser` decodes based on the struct tag.
-    // If I use `RoomID string` I can convert manually.
-
-    // Let's try direct mapping to domain.Booking struct first, usually easier.
-    // But domain.Booking has many fields.
-    
-    fmt.Printf("Updating Booking ID: %d with data: %+v\n", id, input) // Debug Log
-
-    // Use domain booking for simplicity
-    booking := domain.Booking{
-		Subject:   input.Subject,
-        // RoomID will need handling if frontend sends string
-        // StartTime, EndTime handled
-        Note: input.Note,
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID"})
 	}
-    // Handle RoomID manually if needed, but if input.RoomID is uint, frontend MUST send number or string-number.
-    booking.RoomID = input.RoomID
-    booking.StartTime = input.StartTime
-    booking.EndTime = input.EndTime
-    
-    // Get User ID from Token (Assuming Middleware puts it in Locals "user_id" or similar)
-	userCtx := c.Locals("user")
-    actorID := uint(0)
-	if userCtx != nil {
-        userToken := userCtx.(*jwt.Token)
-        claims := userToken.Claims.(jwt.MapClaims)
-        if idFloat, ok := claims["user_id"].(float64); ok {
-            actorID = uint(idFloat)
-        }
-    }
 
-    if err := h.service.UpdateBooking(uint(id), &booking, actorID); err != nil {
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-    }
-    
-    return c.JSON(fiber.Map{"message": "Booking updated successfully"})
+	var booking domain.Booking
+
+	if string(c.Request().Header.ContentType()) == "application/json" {
+		var input struct {
+			Subject      string    `json:"subject"`
+			RoomID       uint      `json:"room_id"`
+			StartTime    time.Time `json:"start_time"`
+			EndTime      time.Time `json:"end_time"`
+			Note         string    `json:"note"`
+			Department   string    `json:"department"`
+			Phone        string    `json:"phone"`
+			Attendees    int       `json:"attendees"`
+			ResourceText string    `json:"resource_text"`
+		}
+
+		if err := c.BodyParser(&input); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
+		}
+
+		booking.Subject = input.Subject
+		booking.RoomID = input.RoomID
+		booking.StartTime = input.StartTime
+		booking.EndTime = input.EndTime
+		booking.Note = input.Note
+		booking.Department = input.Department
+		booking.Phone = input.Phone
+		booking.Attendees = input.Attendees
+		booking.ResourceText = input.ResourceText
+	} else {
+		booking.Subject = c.FormValue("subject")
+		roomID, _ := strconv.Atoi(c.FormValue("room_id"))
+		booking.RoomID = uint(roomID)
+		booking.Note = c.FormValue("note")
+		booking.Department = c.FormValue("department")
+		booking.Phone = c.FormValue("phone")
+		attendees, _ := strconv.Atoi(c.FormValue("attendees"))
+		booking.Attendees = attendees
+		booking.ResourceText = c.FormValue("resource_text")
+
+		layout := "2006-01-02T15:04:05.000Z"
+		if startTime, err := time.Parse(layout, c.FormValue("start_time")); err == nil {
+			booking.StartTime = startTime
+		}
+		if endTime, err := time.Parse(layout, c.FormValue("end_time")); err == nil {
+			booking.EndTime = endTime
+		}
+
+		file, err := c.FormFile("layout_image")
+		if err == nil {
+			cloudName := h.settingService.GetSettingValue("cloudinary_cloud_name")
+			apiKey := h.settingService.GetSettingValue("cloudinary_api_key")
+			apiSecret := h.settingService.GetSettingValue("cloudinary_api_secret")
+
+			if cloudName != "" && apiKey != "" && apiSecret != "" {
+				adapter, err := storage.NewCloudinaryAdapter(cloudName, apiKey, apiSecret)
+				if err == nil {
+					url, err := adapter.Upload(file, fmt.Sprintf("booking_%d", time.Now().UnixNano()))
+					if err == nil {
+						booking.LayoutImage = url
+					}
+				}
+			} else {
+				filename := fmt.Sprintf("booking_%d_%s", time.Now().Unix(), file.Filename)
+				path := fmt.Sprintf("./uploads/%s", filename)
+				if err := c.SaveFile(file, path); err == nil {
+					booking.LayoutImage = "/uploads/" + filename
+				}
+			}
+		}
+	}
+
+	if booking.Subject == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Subject cannot be empty"})
+	}
+
+	// Get User ID from Token
+	userCtx := c.Locals("user")
+	actorID := uint(0)
+	if userCtx != nil {
+		userToken := userCtx.(*jwt.Token)
+		claims := userToken.Claims.(jwt.MapClaims)
+		if idFloat, ok := claims["user_id"].(float64); ok {
+			actorID = uint(idFloat)
+		}
+	}
+
+	if actorID == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+
+	if err := h.service.UpdateBooking(uint(id), &booking, actorID); err != nil {
+		if err.Error() == "unauthorized" || err.Error() == "you do not have permission to update this booking" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"message": "Booking updated successfully"})
 }
 
 // DELETE /api/bookings/:id
-// DELETE /api/bookings/:id
 func (h *BookingHandler) DeleteBooking(c *fiber.Ctx) error {
-    id, err := c.ParamsInt("id")
-    if err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID"})
-    }
+	id, err := c.ParamsInt("id")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid ID"})
+	}
 
-	// Get User ID from Token
-	// Note: Check if Locals("user") exists to avoid panic in case of middleware failure
 	userCtx := c.Locals("user")
 	if userCtx == nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
 	}
-	
+
 	userToken := userCtx.(*jwt.Token)
 	claims := userToken.Claims.(jwt.MapClaims)
-	
-	// Safely retrieve user_id
+
 	idInterface := claims["user_id"]
 	var actorID uint
 	if idFloat, ok := idInterface.(float64); ok {
 		actorID = uint(idFloat)
 	} else {
-		// Fallback or Error
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
 	}
 
-    if err := h.service.DeleteBooking(uint(id), actorID); err != nil {
+	if err := h.service.DeleteBooking(uint(id), actorID); err != nil {
 		if err.Error() == "unauthorized" || err.Error() == "you do not have permission to delete this booking" {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
 		}
-        return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
-    }
-    
-    return c.SendStatus(fiber.StatusOK)
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.SendStatus(fiber.StatusOK)
+}
+
+func parseFlexibleTime(tStr string) (time.Time, error) {
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05.000Z",
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04",
+	}
+	for _, l := range layouts {
+		if t, err := time.Parse(l, tStr); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unable to parse time: %s", tStr)
+}
+
+// POST /api/bookings/check-conflicts
+func (h *BookingHandler) CheckConflicts(c *fiber.Ctx) error {
+	userCtx := c.Locals("user")
+	if userCtx == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+	userToken, ok := userCtx.(*jwt.Token)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token format"})
+	}
+	claims, ok := userToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
+	}
+	tokenUserID := uint(claims["user_id"].(float64))
+
+	var input struct {
+		RoomID uint `json:"room_id"`
+		Slots  []struct {
+			StartTime string `json:"start_time"`
+			EndTime   string `json:"end_time"`
+		} `json:"slots"`
+	}
+
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input: " + err.Error()})
+	}
+
+	if input.RoomID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "room_id is required"})
+	}
+
+	var slots []ports.TimeSlot
+	for _, s := range input.Slots {
+		st, err1 := parseFlexibleTime(s.StartTime)
+		et, err2 := parseFlexibleTime(s.EndTime)
+		if err1 != nil || err2 != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid time format in slots"})
+		}
+		slots = append(slots, ports.TimeSlot{
+			StartTime: st,
+			EndTime:   et,
+		})
+	}
+
+	results, err := h.service.CheckSlotsAvailability(input.RoomID, slots, tokenUserID)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(results)
+}
+
+// POST /api/bookings/recurring (รองรับ File Upload และ Slots หลายวัน)
+func (h *BookingHandler) CreateRecurringBooking(c *fiber.Ctx) error {
+	userCtx := c.Locals("user")
+	if userCtx == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+	userToken, ok := userCtx.(*jwt.Token)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token format"})
+	}
+	claims, ok := userToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
+	}
+	tokenUserID := uint(claims["user_id"].(float64))
+	userRole, _ := claims["role"].(string)
+
+	roomID, _ := strconv.Atoi(c.FormValue("room_id"))
+	attendees, _ := strconv.Atoi(c.FormValue("attendees"))
+	recurrenceType := c.FormValue("recurrence_type")
+	if recurrenceType == "" {
+		recurrenceType = "weekly"
+	}
+
+	assignedUserID := tokenUserID
+	if userRole == "admin" {
+		if uid, err := strconv.Atoi(c.FormValue("user_id")); err == nil && uid > 0 {
+			assignedUserID = uint(uid)
+		}
+	}
+
+	// Parse slots JSON string: [{"start_time": "...", "end_time": "..."}]
+	slotsRaw := c.FormValue("slots")
+	if slotsRaw == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "slots is required"})
+	}
+
+	var slotInputs []struct {
+		StartTime string `json:"start_time"`
+		EndTime   string `json:"end_time"`
+	}
+	if err := json.Unmarshal([]byte(slotsRaw), &slotInputs); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid slots JSON: " + err.Error()})
+	}
+
+	if len(slotInputs) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "At least one slot must be provided"})
+	}
+
+	// Upload layout image if provided
+	var layoutImageURL string
+	file, err := c.FormFile("layout_image")
+	if err == nil {
+		cloudName := h.settingService.GetSettingValue("cloudinary_cloud_name")
+		apiKey := h.settingService.GetSettingValue("cloudinary_api_key")
+		apiSecret := h.settingService.GetSettingValue("cloudinary_api_secret")
+
+		if cloudName != "" && apiKey != "" && apiSecret != "" {
+			adapter, err := storage.NewCloudinaryAdapter(cloudName, apiKey, apiSecret)
+			if err == nil {
+				url, err := adapter.Upload(file, fmt.Sprintf("booking_%d", time.Now().UnixNano()))
+				if err == nil {
+					layoutImageURL = url
+				} else {
+					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Cloudinary Upload Failed: " + err.Error()})
+				}
+			} else {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to init Cloudinary: " + err.Error()})
+			}
+		} else {
+			filename := fmt.Sprintf("booking_%d_%s", time.Now().Unix(), file.Filename)
+			path := fmt.Sprintf("./uploads/%s", filename)
+			if err := c.SaveFile(file, path); err != nil {
+				return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to save file"})
+			}
+			layoutImageURL = "/uploads/" + filename
+		}
+	}
+
+	var bookings []domain.Booking
+	for _, s := range slotInputs {
+		st, err1 := parseFlexibleTime(s.StartTime)
+		et, err2 := parseFlexibleTime(s.EndTime)
+		if err1 != nil || err2 != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid time format in slots"})
+		}
+
+		b := domain.Booking{
+			UserID:         assignedUserID,
+			RoomID:         uint(roomID),
+			Subject:        c.FormValue("subject"),
+			Department:     c.FormValue("department"),
+			Phone:          c.FormValue("phone"),
+			Attendees:      attendees,
+			StartTime:      st,
+			EndTime:        et,
+			Note:           c.FormValue("note"),
+			ResourceText:   c.FormValue("resource_text"),
+			LayoutImage:    layoutImageURL,
+			RecurrenceType: recurrenceType,
+		}
+		bookings = append(bookings, b)
+	}
+
+	createdBookings, err := h.service.CreateRecurringBooking(bookings)
+	if err != nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(createdBookings)
+}
+
+// PATCH /api/bookings/group/:groupId/status
+func (h *BookingHandler) UpdateGroupStatus(c *fiber.Ctx) error {
+	groupID := c.Params("groupId")
+	if groupID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid Group ID"})
+	}
+
+	var input struct {
+		Status string `json:"status"`
+	}
+	if err := c.BodyParser(&input); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
+	}
+
+	if input.Status != "approved" && input.Status != "rejected" && input.Status != "pending" && input.Status != "cancelled" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid status"})
+	}
+
+	userCtx := c.Locals("user")
+	if userCtx == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+	userToken, ok := userCtx.(*jwt.Token)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token format"})
+	}
+	claims, ok := userToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
+	}
+	adminID := uint(claims["user_id"].(float64))
+
+	if err := h.service.UpdateRecurringGroupStatus(groupID, input.Status, adminID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"message": "Group status updated successfully"})
+}
+
+// DELETE /api/bookings/group/:groupId
+func (h *BookingHandler) DeleteGroup(c *fiber.Ctx) error {
+	groupID := c.Params("groupId")
+	if groupID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid Group ID"})
+	}
+
+	userCtx := c.Locals("user")
+	if userCtx == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Unauthorized"})
+	}
+	userToken, ok := userCtx.(*jwt.Token)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token format"})
+	}
+	claims, ok := userToken.Claims.(jwt.MapClaims)
+	if !ok {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid token claims"})
+	}
+	actorID := uint(claims["user_id"].(float64))
+
+	if err := h.service.DeleteRecurringGroup(groupID, actorID); err != nil {
+		if err.Error() == "unauthorized" || err.Error() == "you do not have permission to delete this booking group" {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"message": "Group deleted successfully"})
 }

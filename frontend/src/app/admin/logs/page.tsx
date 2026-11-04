@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useAuthStore } from "@/store/authStore";
 import { useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -17,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Search } from "lucide-react";
 import { format } from "date-fns";
-import { th } from "date-fns/locale";
 import { API_URL } from "@/config";
 
 interface Log {
@@ -35,7 +34,7 @@ interface Log {
 
 export default function LogsPage() {
   const router = useRouter();
-  const { user, isAuthenticated, isInitialized } = useAuthStore();
+  const { user, token, isAuthenticated, isInitialized } = useAuthStore();
   const [logs, setLogs] = useState<Log[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -50,7 +49,9 @@ export default function LogsPage() {
   const fetchLogs = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/logs`);
+      const res = await fetch(`${API_URL}/api/logs`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (res.ok) {
         const data = await res.json();
         setLogs(data);
@@ -63,8 +64,10 @@ export default function LogsPage() {
   };
 
   useEffect(() => {
-    fetchLogs();
-  }, []);
+    if (isAuthenticated && user?.role === "admin") {
+      fetchLogs();
+    }
+  }, [isAuthenticated, user, token]);
 
   const getActionColor = (action: string) => {
     switch (action.toUpperCase()) {
@@ -91,7 +94,6 @@ export default function LogsPage() {
       case "DELETE_ROOM":
       case "DELETE_BOOKING":
       case "DELETE_RESOURCE":
-      case "rejeCT": // Case insensitive check handled by switch? No, value is UPPERCASE in switch
       case "REJECT":
       case "CANCEL":
       case "DELETE":
@@ -103,7 +105,7 @@ export default function LogsPage() {
 
   const filteredLogs = logs.filter(
     (log) =>
-      log.user?.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (log.user?.username || "System").toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
       log.description.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -172,14 +174,14 @@ export default function LogsPage() {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-bold text-slate-600">
-                            {log.user?.username?.substring(0, 1).toUpperCase()}
+                            {log.user?.username ? log.user.username.substring(0, 1).toUpperCase() : "S"}
                           </div>
                           <div className="flex flex-col">
                             <span className="font-medium text-slate-700">
-                              {log.user?.username || "Unknown"}
+                              {log.user?.username || "System"}
                             </span>
                             <span className="text-xs text-slate-400 capitalize">
-                              {log.user?.role || "-"}
+                              {log.user?.role || "System"}
                             </span>
                           </div>
                         </div>

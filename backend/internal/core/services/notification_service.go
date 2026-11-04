@@ -5,6 +5,7 @@ import (
 	"html"
 	"net/http"
 	"net/url"
+	"strings"
 	"tunorth-brms-backend/internal/core/domain"
 	"tunorth-brms-backend/internal/core/ports"
 )
@@ -26,13 +27,13 @@ func NewNotificationService(settings ports.SettingService, roomRepo ports.RoomRe
 func (s *notificationService) SendTelegram(chatID, message string) error {
 	token := s.settings.GetSettingValue("telegram_bot_token")
 	if token == "" || chatID == "" {
-		return nil // ไม่ error แต่ไม่ส่ง
+		return nil
 	}
 
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token)
 	formData := url.Values{
-		"chat_id": {chatID},
-		"text":    {message},
+		"chat_id":    {chatID},
+		"text":       {message},
 		"parse_mode": {"HTML"},
 	}
 
@@ -50,7 +51,6 @@ func (s *notificationService) SendTelegram(chatID, message string) error {
 }
 
 func (s *notificationService) NotifyAdminNewBooking(booking *domain.Booking) error {
-	// เช็คว่าเปิดแจ้งเตือนไหม
 	if s.settings.GetSettingValue("notify_admin") != "true" {
 		return nil
 	}
@@ -72,8 +72,12 @@ func (s *notificationService) NotifyAdminNewBooking(booking *domain.Booking) err
 		userName = user.FullName
 	}
 
-	// Link (Use 127.0.0.1 instead of localhost which Telegram often strips)
-	link := `<a href="http://127.0.0.1:3000/admin/bookings">คลิกเพื่อดูรายละเอียดและอนุมัติ</a>`
+	// Dynamic Base URL
+	baseURL := strings.TrimRight(s.settings.GetSettingValue("site_url"), "/")
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:3000"
+	}
+	link := fmt.Sprintf(`<a href="%s/admin/manage-bookings">คลิกเพื่อดูรายละเอียดและอนุมัติ</a>`, baseURL)
 
 	// Escape strings to prevent HTML parse errors
 	subject := html.EscapeString(booking.Subject)
@@ -97,19 +101,95 @@ func (s *notificationService) NotifyAdminNewBooking(booking *domain.Booking) err
 	return s.SendTelegram(adminChatID, msg)
 }
 
+func (s *notificationService) NotifyAdminNewRecurringBooking(bookings []domain.Booking) error {
+	if len(bookings) == 0 {
+		return nil
+	}
+	if s.settings.GetSettingValue("notify_admin") != "true" {
+		return nil
+	}
+
+	adminChatID := s.settings.GetSettingValue("telegram_admin_chat_id")
+	if adminChatID == "" {
+		return nil
+	}
+
+	firstBooking := bookings[0]
+
+	// Fetch Room Name
+	roomName := fmt.Sprintf("ID %d", firstBooking.RoomID)
+	if room, err := s.roomRepo.GetByID(firstBooking.RoomID); err == nil {
+		roomName = room.RoomName
+	}
+
+	// Fetch User Name
+	userName := fmt.Sprintf("ID %d", firstBooking.UserID)
+	if user, err := s.userRepo.GetByID(firstBooking.UserID); err == nil {
+		userName = user.FullName
+	}
+
+	// Dynamic Base URL
+	baseURL := strings.TrimRight(s.settings.GetSettingValue("site_url"), "/")
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:3000"
+	}
+	link := fmt.Sprintf(`<a href="%s/admin/manage-bookings">คลิกเพื่อดูรายละเอียดและจัดการ</a>`, baseURL)
+
+	// Status text
+	statusText := "รออนุมัติ"
+	if firstBooking.Status == "approved" {
+		statusText = "✅ อนุมัติอัตโนมัติ"
+	}
+
+	// Escape strings
+	subject := html.EscapeString(firstBooking.Subject)
+	rName := html.EscapeString(roomName)
+	uName := html.EscapeString(userName)
+
+	// Date list summary
+	var dateLines []string
+	maxDisplay := 6
+	for i, b := range bookings {
+		if i < maxDisplay {
+			dateLines = append(dateLines, fmt.Sprintf("• %s (%s - %s)",
+				b.StartTime.Format("02/01/2006"),
+				b.StartTime.Format("15:04"),
+				b.EndTime.Format("15:04"),
+			))
+		}
+	}
+	if len(bookings) > maxDisplay {
+		dateLines = append(dateLines, fmt.Sprintf("... และอีก %d ครั้ง", len(bookings)-maxDisplay))
+	}
+
+	datesSummary := strings.Join(dateLines, "\n")
+
+	msg := fmt.Sprintf(
+		"🔔 <b>มีการจองห้องประชุมแบบชุดใหม่ (%d ครั้ง)</b> 🔔\n\n"+
+			"📝 <b>หัวข้อ:</b> %s\n"+
+			"🏢 <b>ห้อง:</b> %s\n"+
+			"📊 <b>สถานะ:</b> %s\n"+
+			"👤 <b>ผู้จอง:</b> %s\n\n"+
+			"📅 <b>รายการวันและเวลา:</b>\n%s\n\n"+
+			"🔗 <b>Link :</b> %s",
+		len(bookings),
+		subject,
+		rName,
+		statusText,
+		uName,
+		datesSummary,
+		link,
+	)
+
+	return s.SendTelegram(adminChatID, msg)
+}
+
 func (s *notificationService) NotifyUserStatusChange(booking *domain.Booking) error {
-	// เช็คว่าเปิดแจ้งเตือนไหม
 	if s.settings.GetSettingValue("notify_user") != "true" {
 		return nil
 	}
 
-	// อันนี้อาจต้อง mapping User ID -> Telegram Chat ID ของ user คนนั้น
-	// แต่ใน requirement ตอนนี้อาจจะส่งเข้า Group รวม หรือถ้ามี field telegram_id ใน user ก็ใช้ได้
-	// สมมติส่งเข้า User Chat ID กลางที่ตั้งไว้ใน Settings ก่อน
 	userChatID := s.settings.GetSettingValue("telegram_user_chat_id")
-	
-	// TODO: ถ้าอนาคต Users มี telegram_id ส่วนตัว ให้ดึงจาก userRepo.GetByID(booking.UserID).TelegramID
-	
 	if userChatID == "" {
 		return nil
 	}

@@ -14,8 +14,26 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { Check, X, Eye, CalendarCheck, Pencil, Trash2 } from "lucide-react";
+import {
+  Check,
+  CheckCheck,
+  X,
+  Eye,
+  CalendarCheck,
+  Pencil,
+  Trash2,
+  Repeat,
+  AlertTriangle,
+} from "lucide-react";
 import BookingDetailModal from "@/components/BookingDetailModal";
 import BookingEditModal from "@/components/BookingEditModal";
 import { API_URL } from "@/config";
@@ -32,6 +50,11 @@ export default function ManageBookingsPage() {
   const [editingBooking, setEditingBooking] = useState<Booking | null>(null);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
 
+  // State สำหรับ Delete Recurring Modal
+  const [deleteTargetBooking, setDeleteTargetBooking] =
+    useState<Booking | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
+
   const fetchBookings = async () => {
     try {
       const res = await fetch(`${API_URL}/api/bookings`, {
@@ -42,7 +65,6 @@ export default function ManageBookingsPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        console.log("Fetched Bookings:", data); // Debug Log
         const sorted = data.sort((a: Booking, b: Booking) => b.id - a.id);
         setBookings(sorted);
       }
@@ -86,6 +108,36 @@ export default function ManageBookingsPage() {
     }
   };
 
+  const handleUpdateGroupStatus = async (
+    groupId: string,
+    newStatus: string
+  ) => {
+    try {
+      const res = await fetch(
+        `${API_URL}/api/bookings/group/${groupId}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      );
+
+      if (!res.ok) throw new Error("Update group failed");
+
+      toast.success(
+        `อัปเดตสถานะทั้งชุดเป็น ${
+          newStatus === "approved" ? "อนุมัติทั้งชุด" : "ไม่อนุมัติทั้งชุด"
+        } เรียบร้อยแล้ว`
+      );
+      fetchBookings();
+    } catch (error) {
+      toast.error("เกิดข้อผิดพลาดในการอัปเดตทั้งชุด");
+    }
+  };
+
   const handleViewDetail = (booking: Booking) => {
     setSelectedBooking(booking);
     setIsModalOpen(true);
@@ -96,8 +148,18 @@ export default function ManageBookingsPage() {
     setIsEditModalOpen(true);
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDeleteClick = (booking: Booking) => {
+    if (booking.recurring_group_id) {
+      setDeleteTargetBooking(booking);
+      setIsDeleteModalOpen(true);
+      return;
+    }
+
     if (!confirm("คุณต้องการลบการจองนี้อย่างถาวรหรือไม่?")) return;
+    executeDeleteSingle(booking.id);
+  };
+
+  const executeDeleteSingle = async (id: number) => {
     try {
       const res = await fetch(`${API_URL}/api/bookings/${id}`, {
         method: "DELETE",
@@ -111,6 +173,29 @@ export default function ManageBookingsPage() {
       }
     } catch (error) {
       toast.error("ลบไม่สำเร็จ");
+    } finally {
+      setIsDeleteModalOpen(false);
+      setDeleteTargetBooking(null);
+    }
+  };
+
+  const executeDeleteGroup = async (groupId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/bookings/group/${groupId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        toast.success("ลบการจองทั้งชุดเรียบร้อยแล้ว");
+        fetchBookings();
+      } else {
+        throw new Error("Delete group failed");
+      }
+    } catch (error) {
+      toast.error("ลบการจองทั้งชุดไม่สำเร็จ");
+    } finally {
+      setIsDeleteModalOpen(false);
+      setDeleteTargetBooking(null);
     }
   };
 
@@ -127,7 +212,7 @@ export default function ManageBookingsPage() {
   if (loading) return <div className="p-10 text-center">Loading...</div>;
 
   return (
-    <div className="container mx-auto py-10 px-4 space-y-8">
+    <div className="container mx-auto py-10 px-4 space-y-8 font-sans">
       {/* Header & Toolbar Section */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -138,7 +223,7 @@ export default function ManageBookingsPage() {
             จัดการการจอง
           </h1>
           <p className="text-slate-500 mt-1 ml-14">
-            ตรวจสอบและอนุมัติรายการจองห้องประชุม
+            ตรวจสอบและอนุมัติรายการจองห้องประชุม (รองรับการจัดการแบบเดี่ยวและทั้งชุด)
           </p>
         </div>
       </div>
@@ -185,6 +270,15 @@ export default function ManageBookingsPage() {
                     <div className="text-sm text-slate-500">
                       {booking.user?.full_name || "Unknown"}
                     </div>
+                    {booking.recurring_group_id && (
+                      <div className="mt-1">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                          <Repeat size={11} />
+                          ชุดการจอง ({booking.recurrence_index}/
+                          {booking.recurrence_total})
+                        </span>
+                      </div>
+                    )}
                   </TableCell>
                   <TableCell>
                     <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
@@ -213,7 +307,7 @@ export default function ManageBookingsPage() {
                     )}
                   </TableCell>
                   <TableCell className="text-right">
-                    <div className="flex justify-end gap-2">
+                    <div className="flex justify-end items-center gap-1.5 flex-wrap">
                       <Button
                         size="sm"
                         variant="outline"
@@ -232,10 +326,28 @@ export default function ManageBookingsPage() {
                             onClick={() =>
                               handleUpdateStatus(booking.id, "approved")
                             }
-                            title="อนุมัติ"
+                            title="อนุมัติเฉพาะรายการนี้"
                           >
                             <Check size={16} />
                           </Button>
+
+                          {booking.recurring_group_id && (
+                            <Button
+                              size="sm"
+                              className="bg-emerald-700 hover:bg-emerald-800 h-8 px-2 rounded-full text-white text-xs gap-1"
+                              onClick={() =>
+                                handleUpdateGroupStatus(
+                                  booking.recurring_group_id!,
+                                  "approved"
+                                )
+                              }
+                              title="อนุมัติทุกรายการในชุดนี้"
+                            >
+                              <CheckCheck size={14} />
+                              <span className="hidden sm:inline">ทั้งชุด</span>
+                            </Button>
+                          )}
+
                           <Button
                             size="sm"
                             variant="destructive"
@@ -243,12 +355,13 @@ export default function ManageBookingsPage() {
                             onClick={() =>
                               handleUpdateStatus(booking.id, "rejected")
                             }
-                            title="ไม่อนุมัติ"
+                            title="ไม่อนุมัติเฉพาะรายการนี้"
                           >
                             <X size={16} />
                           </Button>
                         </>
                       )}
+
                       <Button
                         size="sm"
                         variant="outline"
@@ -261,8 +374,8 @@ export default function ManageBookingsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        className="h-8 w-8 p-0 rounded-full border-slate-200 hover:bg-slate-50"
-                        onClick={() => handleDelete(booking.id)}
+                        className="h-8 w-8 p-0 rounded-full border-slate-200 hover:bg-slate-50 hover:text-red-600"
+                        onClick={() => handleDeleteClick(booking)}
                         title="ลบ"
                       >
                         <Trash2 size={16} className="text-red-500" />
@@ -287,6 +400,56 @@ export default function ManageBookingsPage() {
           </Table>
         </div>
       </div>
+
+      {/* Delete Group Modal */}
+      <Dialog open={isDeleteModalOpen} onOpenChange={setIsDeleteModalOpen}>
+        <DialogContent className="sm:max-w-md bg-white">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-slate-900">
+              <AlertTriangle className="text-amber-500" size={20} />
+              ยืนยันการลบการจองแบบชุด
+            </DialogTitle>
+            <DialogDescription className="text-slate-600 pt-2">
+              รายการนี้เป็นส่วนหนึ่งของชุดการจอง &quot;
+              {deleteTargetBooking?.subject}&quot; (ครั้งที่{" "}
+              {deleteTargetBooking?.recurrence_index} จากทั้งหมด{" "}
+              {deleteTargetBooking?.recurrence_total} ครั้ง)
+              <br />
+              คุณต้องการดำเนินการลบอย่างไร?
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="flex-col sm:flex-row gap-2 pt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteModalOpen(false)}
+              className="w-full sm:w-auto"
+            >
+              ยกเลิก
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() =>
+                deleteTargetBooking &&
+                executeDeleteSingle(deleteTargetBooking.id)
+              }
+              className="w-full sm:w-auto border-amber-300 text-amber-700 hover:bg-amber-50"
+            >
+              ลบเฉพาะรายการวันนี้
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() =>
+                deleteTargetBooking?.recurring_group_id &&
+                executeDeleteGroup(deleteTargetBooking.recurring_group_id)
+              }
+              className="w-full sm:w-auto bg-red-600 hover:bg-red-700"
+            >
+              ลบทุกรายการในชุด ({deleteTargetBooking?.recurrence_total} ครั้ง)
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <BookingDetailModal
         isOpen={isModalOpen}

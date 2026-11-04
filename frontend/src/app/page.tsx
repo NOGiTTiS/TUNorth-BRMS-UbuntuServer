@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
@@ -31,7 +31,7 @@ export default function Home() {
   }, []);
 
   // 2. State ต่างๆ
-  const [rooms, setRooms] = useState<Room[]>([]);
+  const[rooms, setRooms] = useState<Room[]>([]);
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
@@ -54,60 +54,59 @@ export default function Home() {
       }
     };
     fetchRooms();
-  }, []);
+  },[]);
 
-  // 3. ฟังก์ชันดึงข้อมูลการจอง (ถูกเรียกโดย FullCalendar)
-  const fetchEvents = async (
-    info: any,
-    successCallback: any,
-    failureCallback: any
-  ) => {
-    try {
-      // Encode URL เพื่อป้องกันปัญหาเครื่องหมาย + ในวันที่
-      const start = encodeURIComponent(info.startStr);
-      const end = encodeURIComponent(info.endStr);
+  // 3. ฟังก์ชันดึงข้อมูลการจอง (ล็อคด้วย useCallback เพื่อกันปฏิทินกระพริบ)
+  const fetchEvents = useCallback(
+    async (info: any, successCallback: any, failureCallback: any) => {
+      try {
+        // Encode URL เพื่อป้องกันปัญหาเครื่องหมาย + ในวันที่
+        const start = encodeURIComponent(info.startStr);
+        const end = encodeURIComponent(info.endStr);
 
-      const res = await fetch(
-        `${API_URL}/api/bookings?start=${start}&end=${end}&status=approved`
-      );
+        const res = await fetch(
+          `${API_URL}/api/bookings?start=${start}&end=${end}&status=approved`
+        );
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || "Failed to fetch bookings");
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || "Failed to fetch bookings");
+        }
+
+        const bookings = await res.json();
+
+        // แปลงข้อมูลให้ FullCalendar เข้าใจ
+        const events = bookings.map((booking: any) => ({
+          id: booking.id.toString(),
+          title: booking.subject,
+          start: booking.start_time,
+          end: booking.end_time,
+          backgroundColor: booking.room?.color || "#94a3b8",
+          borderColor: booking.room?.color || "#94a3b8",
+          // เก็บข้อมูลเต็มๆ ไว้ส่งให้ Modal
+          extendedProps: {
+            fullBookingData: booking,
+          },
+        }));
+
+        successCallback(events);
+      } catch (error) {
+        console.error("Error loading events:", error);
+        failureCallback(error);
       }
+    },
+    [] // dependency ว่าง หมายถึงไม่ต้องสร้างฟังก์ชันใหม่เลย[1, 3]
+  );
 
-      const bookings = await res.json();
-
-      // แปลงข้อมูลให้ FullCalendar เข้าใจ
-      const events = bookings.map((booking: any) => ({
-        id: booking.id.toString(),
-        title: booking.subject,
-        start: booking.start_time,
-        end: booking.end_time,
-        backgroundColor: booking.room?.color || "#94a3b8",
-        borderColor: booking.room?.color || "#94a3b8",
-        // เก็บข้อมูลเต็มๆ ไว้ส่งให้ Modal
-        extendedProps: {
-          fullBookingData: booking,
-        },
-      }));
-
-      successCallback(events);
-    } catch (error) {
-      console.error("Error loading events:", error);
-      failureCallback(error);
-    }
-  };
-
-  // 4. เมื่อคลิกที่ Event
-  const handleEventClick = (info: any) => {
+  // 4. เมื่อคลิกที่ Event (ล็อคด้วย useCallback)
+  const handleEventClick = useCallback((info: any) => {
     const bookingData = info.event.extendedProps.fullBookingData;
     setSelectedBooking(bookingData);
     setIsModalOpen(true);
-  };
+  },[]);
 
-  // 5. ปรับหน้าตาภายในแถบ Event
-  const renderEventContent = (eventInfo: any) => {
+  // 5. ปรับหน้าตาภายในแถบ Event (ล็อคด้วย useCallback)
+  const renderEventContent = useCallback((eventInfo: any) => {
     return (
       <div className="flex items-center w-full overflow-hidden px-1.5 py-0.5 cursor-pointer hover:opacity-90 transition-opacity">
         <span className="font-bold bg-white/20 rounded-[4px] px-1 mr-1.5 text-[10px] whitespace-nowrap leading-tight">
@@ -120,15 +119,17 @@ export default function Home() {
         </div>
       </div>
     );
-  };
+  },[]);
 
-  // 6. เมื่อคลิกที่วันที่ (สำหรับจอง)
-  const handleDateClick = (info: any) => {
-    if (isAuthenticated) {
-      // Redirect ไปหน้าจอง พร้อมส่งวันที่ไปด้วย
-      router.push(`/booking/create?date=${info.dateStr}`);
-    }
-  };
+  // 6. เมื่อคลิกที่วันที่ (สำหรับจอง) (ล็อคด้วย useCallback)
+  const handleDateClick = useCallback(
+    (info: any) => {
+      if (isAuthenticated) {
+        // Redirect ไปหน้าจอง พร้อมส่งวันที่ไปด้วย
+        router.push(`/booking/create?date=${info.dateStr}`);
+      }
+    },[isAuthenticated, router] // นำ dependency ที่ถูกเรียกใช้ด้านในมาใส่
+  );
 
   // ถ้ายังโหลด Client ไม่เสร็จ ห้าม render เพื่อกัน Hydration Error
   if (!isMounted) return null;

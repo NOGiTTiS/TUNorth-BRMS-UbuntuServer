@@ -50,6 +50,7 @@ func (s *settingService) InitializeDefaults() error {
 		// General
 		{SettingName: "site_name", SettingValue: "TUNorth-BRMS", Group: "general", Type: "text", Label: "ระบบชื่อ", Description: "ชื่อระบบที่แสดงบนแถบ Title"},
 		{SettingName: "site_description", SettingValue: "ระบบจองห้องประชุมออนไลน์", Group: "general", Type: "text", Label: "คำอธิบายระบบ", Description: "คำอธิบายสั้นๆ เกี่ยวกับระบบ"},
+		{SettingName: "site_url", SettingValue: "http://localhost:3000", Group: "general", Type: "text", Label: "URL ของเว็บไซต์", Description: "URL สำหรับสร้างลิงก์ในระบบแจ้งเตือน (เช่น https://brms.tunorth.ac.th)"},
 		{SettingName: "copyright_text", SettingValue: "© 2026 Triam Udom Suksa", Group: "general", Type: "text", Label: "ข้อความลิขสิทธิ์", Description: "ข้อความ Footer"},
 		{SettingName: "institute_name", SettingValue: "Triam Udom Suksa", Group: "general", Type: "text", Label: "ชื่อสถาบัน", Description: "ชื่อสถาบันต้นสังกัด"},
 		{SettingName: "enable_register", SettingValue: "true", Group: "general", Type: "boolean", Label: "เปิดรับสมัครสมาชิก", Description: "เปิด/ปิด การลงทะเบียนสมัครสมาชิกใหม่"},
@@ -68,6 +69,7 @@ func (s *settingService) InitializeDefaults() error {
 		{SettingName: "default_booking_status", SettingValue: "pending", Group: "booking", Type: "select", Label: "สถานะเริ่มต้น", Description: "pending หรือ approved"},
 		{SettingName: "advance_booking_days", SettingValue: "1", Group: "booking", Type: "number", Label: "จองล่วงหน้าอย่างน้อย (วัน)", Description: "จำนวนวันที่ต้องจองล่วงหน้า"},
 		{SettingName: "allow_weekend", SettingValue: "false", Group: "booking", Type: "boolean", Label: "อนุญาตให้จองเสาร์-อาทิตย์", Description: "เปิด/ปิด การจองในวันหยุด"},
+		{SettingName: "max_recurring_count", SettingValue: "12", Group: "booking", Type: "number", Label: "จำนวนการจองซ้ำสูงสุด (ครั้ง)", Description: "จำกัดจำนวนครั้งสูงสุดต่อการจองแบบชุด/ต่อเนื่อง (เช่น 12 ครั้ง)"},
 
 		// Telegram
 		{SettingName: "telegram_bot_token", SettingValue: "", Group: "telegram", Type: "password", Label: "Telegram Bot Token", Description: "Token จาก BotFather"},
@@ -92,7 +94,7 @@ func (s *settingService) InitializeDefaults() error {
 	for _, d := range defaults {
 		existing, err := s.repo.GetByName(d.SettingName)
 		if err != nil || existing.SettingName == "" {
-			_ = s.repo.Update(&d) // Create if not exists (using Save/Update logic)
+			_ = s.repo.Update(&d)
 		}
 	}
 	return nil

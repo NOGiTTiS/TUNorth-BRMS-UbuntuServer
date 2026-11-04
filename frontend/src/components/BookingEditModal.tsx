@@ -23,6 +23,8 @@ import {
 import { API_URL } from "@/config";
 import { Booking } from "@/types/booking";
 import { Room } from "@/types/room";
+import { Resource } from "@/types/resource";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useAuthStore } from "@/store/authStore";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -53,22 +55,35 @@ export default function BookingEditModal({
     end_date: "",
     end_time: "",
     note: "",
+    department: "",
+    phone: "",
+    attendees: "",
+    resources: [] as string[],
   });
 
-  // Fetch Rooms for Dropdown
+  const [layoutImage, setLayoutImage] = useState<File | null>(null);
+  const [resourceOptions, setResourceOptions] = useState<Resource[]>([]);
+
+  // Fetch Rooms and Resources for Dropdown
   useEffect(() => {
     if (isOpen) {
-      const fetchRooms = async () => {
+      const fetchData = async () => {
         try {
-          const res = await fetch(`${API_URL}/api/rooms`);
-          if (res.ok) {
-            setRooms(await res.json());
+          const [roomsRes, resourcesRes] = await Promise.all([
+            fetch(`${API_URL}/api/rooms`),
+            fetch(`${API_URL}/api/resources`)
+          ]);
+          if (roomsRes.ok) {
+            setRooms(await roomsRes.json());
+          }
+          if (resourcesRes.ok) {
+            setResourceOptions(await resourcesRes.json());
           }
         } catch (e) {
-          console.error("Failed to load rooms", e);
+          console.error("Failed to load data", e);
         }
       };
-      fetchRooms();
+      fetchData();
     }
   }, [isOpen]);
 
@@ -92,7 +107,14 @@ export default function BookingEditModal({
           minute: "2-digit",
         }),
         note: booking.note || "",
+        department: booking.department || "",
+        phone: booking.phone || "",
+        attendees: booking.attendees ? booking.attendees.toString() : "",
+        resources: booking.resource_text && booking.resource_text !== "-"
+          ? booking.resource_text.split(",").map((s) => s.trim())
+          : [],
       });
+      setLayoutImage(null);
     }
   }, [booking]);
 
@@ -100,6 +122,26 @@ export default function BookingEditModal({
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>
   ) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setLayoutImage(e.target.files[0]);
+    }
+  };
+
+  const handleResourceChange = (checked: boolean, resourceName: string) => {
+    if (checked) {
+      setFormData((prev) => ({
+        ...prev,
+        resources: [...prev.resources, resourceName],
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        resources: prev.resources.filter((r) => r !== resourceName),
+      }));
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -113,21 +155,30 @@ export default function BookingEditModal({
       );
       const endDateTime = new Date(`${formData.end_date}T${formData.end_time}`);
 
-      const payload = {
-        subject: formData.subject,
-        room_id: parseInt(formData.room_id, 10), // Convert to number
-        start_time: startDateTime.toISOString(),
-        end_time: endDateTime.toISOString(),
-        note: formData.note,
-      };
+      const formDataToSend = new FormData();
+      formDataToSend.append("subject", formData.subject);
+      formDataToSend.append("room_id", formData.room_id);
+      formDataToSend.append("start_time", startDateTime.toISOString());
+      formDataToSend.append("end_time", endDateTime.toISOString());
+      formDataToSend.append("note", formData.note);
+      formDataToSend.append("department", formData.department);
+      formDataToSend.append("phone", formData.phone);
+      formDataToSend.append("attendees", formData.attendees || "0");
+      formDataToSend.append(
+        "resource_text",
+        formData.resources.length > 0 ? formData.resources.join(", ") : "-"
+      );
+      
+      if (layoutImage) {
+        formDataToSend.append("layout_image", layoutImage);
+      }
 
       const res = await fetch(`${API_URL}/api/bookings/${booking.id}`, {
         method: "PUT",
         headers: {
-          "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(payload),
+        body: formDataToSend,
       });
 
       if (!res.ok) throw new Error("Correction failed");
@@ -144,8 +195,8 @@ export default function BookingEditModal({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-lg rounded-3xl bg-white p-0 overflow-hidden border-none shadow-2xl">
-        <DialogHeader className="px-6 pt-6 pb-2 bg-slate-50 border-b border-slate-100">
+      <DialogContent className="sm:max-w-lg rounded-3xl bg-white p-0 overflow-hidden border-none shadow-2xl max-h-[90vh] flex flex-col">
+        <DialogHeader className="px-6 pt-6 pb-2 bg-slate-50 border-b border-slate-100 shrink-0">
           <DialogTitle className="text-xl font-bold text-slate-800">
             แก้ไขข้อมูลการจอง
           </DialogTitle>
@@ -154,7 +205,8 @@ export default function BookingEditModal({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-col overflow-hidden max-h-full">
+          <div className="p-6 space-y-4 overflow-y-auto">
           <div className="space-y-2">
             <Label>หัวข้อการประชุม</Label>
             <Input
@@ -235,6 +287,101 @@ export default function BookingEditModal({
             </div>
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="space-y-2">
+              <Label>ฝ่าย/หน่วยงาน</Label>
+              <Input
+                name="department"
+                value={formData.department}
+                onChange={handleChange}
+                className="rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>เบอร์โทรติดต่อ</Label>
+              <Input
+                name="phone"
+                value={formData.phone}
+                onChange={handleChange}
+                className="rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>จำนวนผู้เข้าร่วม (คน)</Label>
+              <Input
+                type="number"
+                name="attendees"
+                value={formData.attendees}
+                onChange={handleChange}
+                className="rounded-xl"
+                min="1"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>อุปกรณ์ที่ต้องการ</Label>
+            {resourceOptions.length === 0 ? (
+              <p className="text-sm text-slate-400">ไม่มีข้อมูลอุปกรณ์</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                {resourceOptions.map((item) => (
+                  <div key={item.id} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`edit-res-${item.id}`}
+                      checked={formData.resources.includes(item.resource_name)}
+                      onCheckedChange={(checked) =>
+                        handleResourceChange(checked as boolean, item.resource_name)
+                      }
+                    />
+                    <label
+                      htmlFor={`edit-res-${item.id}`}
+                      className="text-sm font-medium leading-none cursor-pointer text-slate-700"
+                    >
+                      {item.resource_name}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>รูปแบบการจัดห้อง (เปลี่ยนรูปใหม่ - ถ้ามี)</Label>
+            <div className="flex items-center gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
+              <Input
+                id="edit_layout_image"
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  handleFileChange(e);
+                  const file = e.target.files?.[0];
+                  const span = document.getElementById("edit-file-name-display");
+                  if (span)
+                    span.innerText = file ? file.name : "ไม่ได้เลือกไฟล์ใด";
+                }}
+              />
+              <Label
+                htmlFor="edit_layout_image"
+                className="bg-white text-slate-700 hover:text-tu-pink border border-slate-200 hover:border-tu-pink shadow-sm transition-all px-4 py-2 rounded-lg cursor-pointer text-sm font-medium"
+              >
+                เลือกไฟล์รูปภาพ
+              </Label>
+              <span
+                id="edit-file-name-display"
+                className="text-sm text-slate-400 italic"
+              >
+                ไม่ได้เลือกไฟล์ใด
+              </span>
+            </div>
+            {booking?.layout_image && !layoutImage && (
+              <p className="text-sm text-slate-500 mt-2">
+                * มีรูปภาพเดิมอยู่แล้ว หากไม่เลือกไฟล์ใหม่จะใช้รูปเดิม
+              </p>
+            )}
+          </div>
+
           <div className="space-y-2">
             <Label>หมายเหตุ</Label>
             <Textarea
@@ -245,7 +392,9 @@ export default function BookingEditModal({
             />
           </div>
 
-          <DialogFooter className="pt-4 gap-2">
+          </div>
+
+          <DialogFooter className="px-6 py-4 gap-2 bg-slate-50 border-t border-slate-100 mt-auto shrink-0">
             <Button
               type="button"
               variant="outline"

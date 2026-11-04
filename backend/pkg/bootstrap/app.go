@@ -81,14 +81,12 @@ func CreateApp() (*fiber.App, error) {
 	authHandler := http.NewAuthHandler(authService, logService, settingService)
 
 	// Auto-Migrate & Initialize Defaults
-	// Note: NewDatabase already does most migrations, but we keep this to ensure consistency with original main.go
 	if err := database.DB.AutoMigrate(&domain.Setting{}, &domain.Booking{}, &domain.Log{}); err != nil {
 		log.Println("Warning: AutoMigrate failed:", err)
-		// Don't fail hard on migration error, might be permission issue
 	}
 	
-	go settingService.InitializeDefaults() // Run in background to avoid blocking
-	go userService.InitializeDefaultAdmin() // Run in background
+	go settingService.InitializeDefaults()
+	go userService.InitializeDefaultAdmin()
 
 	// 4. Setup Fiber App
 	app := fiber.New(fiber.Config{
@@ -98,13 +96,12 @@ func CreateApp() (*fiber.App, error) {
 	// Middleware
 	app.Use(logger.New())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     "*",
-		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
-		AllowMethods:     "GET, POST, HEAD, PUT, DELETE, PATCH, OPTIONS",
+		AllowOrigins: "*",
+		AllowHeaders: "Origin, Content-Type, Accept, Authorization",
+		AllowMethods: "GET, POST, HEAD, PUT, DELETE, PATCH, OPTIONS",
 	}))
 
-	// Static files (Verify if this works in serverless, typically Vercel handles static files separately)
-	// Only serve if directory exists to avoid error
+	// Static files
 	if _, err := os.Stat("./uploads"); err == nil {
 		app.Static("/uploads", "./uploads")
 	}
@@ -112,27 +109,39 @@ func CreateApp() (*fiber.App, error) {
 	// 5. Routes Definition
 	api := app.Group("/api")
 
-	// Public Settings
+	// Public Settings (Sanitized whitelist)
 	api.Get("/settings/public", settingHandler.GetPublicSettings)
 
 	// Middleware JWT
 	jwtMiddleware := jwtware.New(jwtware.Config{
 		SigningKey: jwtware.SigningKey{Key: []byte(os.Getenv("JWT_SECRET"))},
+		ErrorHandler: func(c *fiber.Ctx, err error) error {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+				"error": "Unauthorized: " + err.Error(),
+			})
+		},
 	})
+
+	// Admin Role Middleware (RBAC)
+	adminMiddleware := http.RequireRole("admin")
 
 	// Room Routes
 	rooms := api.Group("/rooms")
-	rooms.Post("/", roomHandler.CreateRoom)
 	rooms.Get("/", roomHandler.GetAllRooms)
 	rooms.Get("/:id", roomHandler.GetRoom)
-	rooms.Put("/:id", roomHandler.UpdateRoom)
-	rooms.Delete("/:id", roomHandler.DeleteRoom)
+	rooms.Post("/", jwtMiddleware, adminMiddleware, roomHandler.CreateRoom)
+	rooms.Put("/:id", jwtMiddleware, adminMiddleware, roomHandler.UpdateRoom)
+	rooms.Delete("/:id", jwtMiddleware, adminMiddleware, roomHandler.DeleteRoom)
 
 	// Booking Routes
 	bookings := api.Group("/bookings")
 	bookings.Get("/", bookingHandler.GetBookings)
 	bookings.Post("/", jwtMiddleware, bookingHandler.CreateBooking)
-	bookings.Patch("/:id/status", jwtMiddleware, bookingHandler.UpdateStatus)
+	bookings.Post("/check-conflicts", jwtMiddleware, bookingHandler.CheckConflicts)
+	bookings.Post("/recurring", jwtMiddleware, bookingHandler.CreateRecurringBooking)
+	bookings.Patch("/group/:groupId/status", jwtMiddleware, adminMiddleware, bookingHandler.UpdateGroupStatus)
+	bookings.Delete("/group/:groupId", jwtMiddleware, bookingHandler.DeleteGroup)
+	bookings.Patch("/:id/status", jwtMiddleware, adminMiddleware, bookingHandler.UpdateStatus)
 	bookings.Put("/:id", jwtMiddleware, bookingHandler.UpdateBooking)
 	bookings.Delete("/:id", jwtMiddleware, bookingHandler.DeleteBooking)
 
@@ -140,18 +149,19 @@ func CreateApp() (*fiber.App, error) {
 	api.Post("/register", authHandler.Register)
 	api.Post("/login", authHandler.Login)
 
-	// Protected Routes (Already used jwtMiddleware inside)
+	// Protected Routes (Profile)
 	api.Get("/me", jwtMiddleware, authHandler.GetMe)
 	api.Put("/me", jwtMiddleware, authHandler.UpdateMe)
 
-	// Settings Protected
-	api.Get("/settings", jwtMiddleware, settingHandler.GetAllSettings)
-	api.Put("/settings", jwtMiddleware, settingHandler.UpdateSettings)
-	api.Post("/settings/upload", jwtMiddleware, settingHandler.UploadImage)
+	// Settings Protected (Admin Only)
+	api.Get("/settings", jwtMiddleware, adminMiddleware, settingHandler.GetAllSettings)
+	api.Put("/settings", jwtMiddleware, adminMiddleware, settingHandler.UpdateSettings)
+	api.Post("/settings/upload", jwtMiddleware, adminMiddleware, settingHandler.UploadImage)
 
-	// User Routes
-	users := api.Group("/users")
+	// User Routes (Admin Only)
+	users := api.Group("/users", jwtMiddleware, adminMiddleware)
 	users.Get("/", userHandler.GetAllUsers)
+	users.Post("/", userHandler.CreateUser)
 	users.Put("/:id", userHandler.UpdateUser)
 	users.Delete("/:id", userHandler.DeleteUser)
 	users.Post("/import", userHandler.ImportUsers)
@@ -159,16 +169,16 @@ func CreateApp() (*fiber.App, error) {
 	// Resource Routes
 	resources := api.Group("/resources")
 	resources.Get("/", resHandler.GetAllResources)
-	resources.Post("/", resHandler.CreateResource)
-	resources.Put("/:id", resHandler.UpdateResource)
-	resources.Delete("/:id", resHandler.DeleteResource)
+	resources.Post("/", jwtMiddleware, adminMiddleware, resHandler.CreateResource)
+	resources.Put("/:id", jwtMiddleware, adminMiddleware, resHandler.UpdateResource)
+	resources.Delete("/:id", jwtMiddleware, adminMiddleware, resHandler.DeleteResource)
 
-	// Report Routes
-	api.Get("/reports/dashboard", reportHandler.GetDashboardStats)
+	// Report Routes (Admin Only)
+	api.Get("/reports/dashboard", jwtMiddleware, adminMiddleware, reportHandler.GetDashboardStats)
 
-	// Log Routes
-	api.Get("/logs", logHandler.GetLogs)
-	api.Post("/logs/test", logHandler.CreateTestLog)
+	// Log Routes (Admin Only)
+	api.Get("/logs", jwtMiddleware, adminMiddleware, logHandler.GetLogs)
+	api.Post("/logs/test", jwtMiddleware, adminMiddleware, logHandler.CreateTestLog)
 
 	// Test Route
 	app.Get("/", func(c *fiber.Ctx) error {

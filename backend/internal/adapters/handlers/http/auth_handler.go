@@ -29,10 +29,9 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	// 1. สร้าง Struct สำหรับรับข้อมูลการสมัครโดยเฉพาะ (เพื่อให้รับ Password ได้)
 	type RegisterRequest struct {
 		Username   string `json:"username"`
-		Password   string `json:"password"` // ตรงนี้ไม่มี - แล้ว รับค่าได้ปกติ
+		Password   string `json:"password"`
 		FullName   string `json:"full_name"`
 		Department string `json:"department"`
-		Role       string `json:"role"`
 		Email      string `json:"email"`
 		Tel        string `json:"tel"`
 	}
@@ -45,12 +44,13 @@ func (h *AuthHandler) Register(c *fiber.Ctx) error {
 	}
 
 	// 3. ย้ายข้อมูลจาก Request ไปใส่ใน domain.User
+	// บังคับให้ Role เป็น "user" เสมอเพื่อป้องกัน Privilege Escalation
 	user := domain.User{
 		Username:   req.Username,
 		Password:   req.Password, // ส่งรหัสผ่านไปให้ Service Hash ต่อ
 		FullName:   req.FullName,
 		Department: req.Department,
-		Role:       req.Role,
+		Role:       "user",
 		Email:      req.Email,
 		Tel:        req.Tel,
 	}
@@ -100,8 +100,8 @@ func (h *AuthHandler) GetMe(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "User not found"})
 	}
 
-    // Hide password
-    u.Password = ""
+	// Hide password
+	u.Password = ""
 
 	return c.JSON(u)
 }
@@ -112,12 +112,28 @@ func (h *AuthHandler) UpdateMe(c *fiber.Ctx) error {
 	claims := user.Claims.(jwt.MapClaims)
 	userID := uint(claims["user_id"].(float64))
 
-	var req domain.User
-	if err := c.BodyParser(&req); err != nil {
-        return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
-    }
+	type UpdateMeRequest struct {
+		FullName   string `json:"full_name"`
+		Email      string `json:"email"`
+		Tel        string `json:"tel"`
+		Department string `json:"department"`
+		Password   string `json:"password"`
+	}
 
-	if err := h.service.UpdateMe(userID, &req); err != nil {
+	var req UpdateMeRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid input"})
+	}
+
+	userUpdates := domain.User{
+		FullName:   req.FullName,
+		Email:      req.Email,
+		Tel:        req.Tel,
+		Department: req.Department,
+		Password:   req.Password,
+	}
+
+	if err := h.service.UpdateMe(userID, &userUpdates); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
 	}
 
