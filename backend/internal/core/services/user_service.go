@@ -52,6 +52,33 @@ func (s *userService) GetAllUsers() ([]domain.User, error) {
 	return s.repo.GetAll()
 }
 
+func (s *userService) GetPaginatedUsers(page, limit int, search string) (*domain.PaginatedResult[domain.User], error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	users, total, err := s.repo.GetPaginated(page, limit, search)
+	if err != nil {
+		return nil, err
+	}
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(limit) - 1) / int64(limit))
+	}
+
+	return &domain.PaginatedResult[domain.User]{
+		Data:       users,
+		Total:      total,
+		Page:       page,
+		Limit:      limit,
+		TotalPages: totalPages,
+	}, nil
+}
+
 func (s *userService) UpdateUser(id uint, input *domain.User) error {
 	existingUser, err := s.repo.GetByID(id)
 	if err != nil {

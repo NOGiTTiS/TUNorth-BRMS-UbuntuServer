@@ -9,6 +9,7 @@ type UserRepository interface {
 	GetByUsernameOrEmail(identifier string) (*domain.User, error)
 	GetByID(id uint) (*domain.User, error)
 	GetAll() ([]domain.User, error)
+	GetPaginated(page, limit int, search string) ([]domain.User, int64, error)
 	Update(user *domain.User) error
 	Delete(id uint) error
 	Count() (int64, error)
@@ -24,6 +25,7 @@ type AuthService interface {
 // --- แก้ไขตรงนี้ครับ ---
 type UserService interface {
 	GetAllUsers() ([]domain.User, error)
+	GetPaginatedUsers(page, limit int, search string) (*domain.PaginatedResult[domain.User], error)
 	UpdateUser(id uint, user *domain.User) error
 	DeleteUser(id uint) error
 

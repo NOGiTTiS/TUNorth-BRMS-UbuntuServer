@@ -1,6 +1,7 @@
 package http
 
 import (
+	"strconv"
 	"tunorth-brms-backend/internal/core/ports"
 
 	"github.com/gofiber/fiber/v2"
@@ -16,6 +17,25 @@ func NewLogHandler(service ports.LogService) *LogHandler {
 
 // [GET] /api/logs
 func (h *LogHandler) GetLogs(c *fiber.Ctx) error {
+	pageStr := c.Query("page")
+	if pageStr != "" {
+		page, _ := strconv.Atoi(pageStr)
+		limit, _ := strconv.Atoi(c.Query("limit"))
+		search := c.Query("search")
+		if page <= 0 {
+			page = 1
+		}
+		if limit <= 0 {
+			limit = 10
+		}
+
+		res, err := h.service.GetPaginatedLogs(page, limit, search)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(res)
+	}
+
 	logs, err := h.service.GetLogs(100) // Limit 100 default
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

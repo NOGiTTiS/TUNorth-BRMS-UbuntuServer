@@ -146,11 +146,14 @@ function CreateBookingContent() {
 
     const fetchData = async () => {
       try {
-        // Fetch Rooms (Only active ones)
+        // Fetch Rooms (Only active ones, sorted by id ASC)
         const roomsRes = await fetch(`${API_URL}/api/rooms?status=active`);
         if (roomsRes.ok) {
-          const roomsData = await roomsRes.json();
-          setRooms(roomsData);
+          const roomsData: Room[] = await roomsRes.json();
+          const sortedRooms = Array.isArray(roomsData)
+            ? [...roomsData].sort((a, b) => a.id - b.id)
+            : [];
+          setRooms(sortedRooms);
         }
 
         // Fetch Resources

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { Booking } from "@/types/booking";
@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Pagination } from "@/components/ui/pagination";
 import {
   Dialog,
   DialogContent,
@@ -33,6 +35,7 @@ import {
   Trash2,
   Repeat,
   AlertTriangle,
+  Search,
 } from "lucide-react";
 import BookingDetailModal from "@/components/BookingDetailModal";
 import BookingEditModal from "@/components/BookingEditModal";
@@ -55,9 +58,28 @@ export default function ManageBookingsPage() {
     useState<Booking | null>(null);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
 
-  const fetchBookings = async () => {
+  // State สำหรับ Pagination & Filter
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+
+  const fetchBookings = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/bookings`, {
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.append("page", page.toString());
+      params.append("limit", pageSize.toString());
+      if (statusFilter !== "all") {
+        params.append("status", statusFilter);
+      }
+      if (searchTerm.trim()) {
+        params.append("search", searchTerm.trim());
+      }
+
+      const res = await fetch(`${API_URL}/api/bookings?${params.toString()}`, {
         cache: "no-store",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -65,15 +87,22 @@ export default function ManageBookingsPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        const sorted = data.sort((a: Booking, b: Booking) => b.id - a.id);
-        setBookings(sorted);
+        if (data && Array.isArray(data.data)) {
+          setBookings(data.data);
+          setTotal(data.total);
+          setTotalPages(data.total_pages);
+        } else if (Array.isArray(data)) {
+          setBookings(data);
+          setTotal(data.length);
+          setTotalPages(1);
+        }
       }
     } catch (error) {
       console.error("Failed to fetch bookings");
     } finally {
       setLoading(false);
     }
-  };
+  }, [page, pageSize, statusFilter, searchTerm, token]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -82,7 +111,7 @@ export default function ManageBookingsPage() {
       return;
     }
     fetchBookings();
-  }, [isAuthenticated, isInitialized, router, token]);
+  }, [isAuthenticated, isInitialized, router, fetchBookings]);
 
   const handleUpdateStatus = async (id: number, newStatus: string) => {
     try {
@@ -209,7 +238,9 @@ export default function ManageBookingsPage() {
     });
   };
 
-  if (loading) return <div className="p-10 text-center">Loading...</div>;
+  if (loading && bookings.length === 0 && !searchTerm && statusFilter === "all") {
+    return <div className="p-10 text-center text-slate-500">กำลังโหลดข้อมูล...</div>;
+  }
 
   return (
     <div className="container mx-auto py-10 px-4 space-y-8 font-sans">
@@ -226,6 +257,47 @@ export default function ManageBookingsPage() {
             ตรวจสอบและอนุมัติรายการจองห้องประชุม (รองรับการจัดการแบบเดี่ยวและทั้งชุด)
           </p>
         </div>
+
+        <div className="flex items-center gap-3">
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Input
+              placeholder="ค้นหาหัวข้อ / ผู้จอง..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
+              className="pl-9 bg-white border-slate-200 rounded-full"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Filter Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        {[
+          { label: "ทั้งหมด", value: "all" },
+          { label: "รออนุมัติ", value: "pending" },
+          { label: "อนุมัติแล้ว", value: "approved" },
+          { label: "ไม่อนุมัติ", value: "rejected" },
+        ].map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => {
+              setStatusFilter(tab.value);
+              setPage(1);
+            }}
+            className={`px-4 py-1.5 rounded-full text-xs font-medium transition-all ${
+              statusFilter === tab.value
+                ? "bg-slate-900 text-white shadow-sm"
+                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Table Section (Card) */}
@@ -398,6 +470,20 @@ export default function ManageBookingsPage() {
               )}
             </TableBody>
           </Table>
+
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalItems={total}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(newSize) => {
+                setPageSize(newSize);
+                setPage(1);
+              }}
+            />
+          </div>
         </div>
       </div>
 

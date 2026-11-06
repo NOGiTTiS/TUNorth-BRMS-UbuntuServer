@@ -20,6 +20,7 @@ type BookingRepository interface {
 	Create(booking *domain.Booking) error
 	CreateBatch(bookings []domain.Booking) error
 	GetAll() ([]domain.Booking, error)
+	GetPaginated(params domain.BookingFilterParams) ([]domain.Booking, int64, error)
 	GetByID(id uint) (*domain.Booking, error)
 	GetByRecurringGroupID(groupID string) ([]domain.Booking, error)
 	// ดึงเฉพาะช่วงเวลา (สำหรับปฏิทิน)
@@ -39,6 +40,7 @@ type BookingService interface {
 	CheckSlotsAvailability(roomID uint, slots []TimeSlot, userID uint) ([]SlotCheckResult, error)
 	CreateRecurringBooking(bookings []domain.Booking) ([]domain.Booking, error)
 	GetAllBookings() ([]domain.Booking, error)
+	GetPaginatedBookings(params domain.BookingFilterParams) (*domain.PaginatedResult[domain.Booking], error)
 	GetBookingsByRange(start, end string) ([]domain.Booking, error) // รับ string แล้วแปลงเป็น time ใน service
 	GetBookingByID(id uint) (*domain.Booking, error)
 	UpdateBookingStatus(id uint, status string, approverID uint) error

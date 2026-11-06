@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { User } from "@/types/user";
@@ -16,6 +16,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Pagination } from "@/components/ui/pagination";
 import {
   Dialog,
   DialogContent,
@@ -49,6 +50,13 @@ export default function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Pagination & Search States
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [searchTerm, setSearchTerm] = useState("");
+
   // State for Edit Modal
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
@@ -59,14 +67,30 @@ export default function AdminUsersPage() {
   const [importFile, setImportFile] = useState<File | null>(null);
 
   // 1. Fetch Users
-  // 1. Fetch Users
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/users`, {
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.append("page", page.toString());
+      params.append("limit", pageSize.toString());
+      if (searchTerm.trim()) {
+        params.append("search", searchTerm.trim());
+      }
+
+      const res = await fetch(`${API_URL}/api/users?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
-        setUsers(await res.json());
+        const data = await res.json();
+        if (data && Array.isArray(data.data)) {
+          setUsers(data.data);
+          setTotal(data.total);
+          setTotalPages(data.total_pages);
+        } else if (Array.isArray(data)) {
+          setUsers(data);
+          setTotal(data.length);
+          setTotalPages(1);
+        }
       } else {
         toast.error("ไม่สามารถดึงข้อมูลผู้ใช้งานได้");
       }
@@ -76,9 +100,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  };
-
-  // ... (rest of code) ...
+  }, [page, pageSize, searchTerm, token]);
 
   useEffect(() => {
     if (!isAuthenticated || currentUser?.role !== "admin") {
@@ -86,7 +108,7 @@ export default function AdminUsersPage() {
       return;
     }
     fetchUsers();
-  }, [isAuthenticated, currentUser, router, token]);
+  }, [isAuthenticated, currentUser, router, fetchUsers]);
 
   // 2. Edit Logic
   const openEditModal = (user: User) => {
@@ -213,7 +235,9 @@ export default function AdminUsersPage() {
     return URL.createObjectURL(blob);
   };
 
-  if (loading) return <div className="p-10 text-center">Loading...</div>;
+  if (loading && users.length === 0 && !searchTerm) {
+    return <div className="p-10 text-center text-slate-500">กำลังโหลดข้อมูล...</div>;
+  }
 
   return (
     <div className="container mx-auto py-10 px-4 space-y-8">
@@ -231,7 +255,12 @@ export default function AdminUsersPage() {
           <div className="relative w-64">
             <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
             <Input
-              placeholder="ค้นหา..."
+              placeholder="ค้นหาชื่อ, อีเมล, แผนก..."
+              value={searchTerm}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
               className="pl-9 bg-white border-slate-200 rounded-full"
             />
           </div>
@@ -366,6 +395,20 @@ export default function AdminUsersPage() {
               )}
             </TableBody>
           </Table>
+
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalItems={total}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(newSize) => {
+                setPageSize(newSize);
+                setPage(1);
+              }}
+            />
+          </div>
         </div>
       </div>
 

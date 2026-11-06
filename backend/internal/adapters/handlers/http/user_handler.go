@@ -3,6 +3,7 @@ package http
 import (
 	"encoding/csv"
 	"io"
+	"strconv"
 	"tunorth-brms-backend/internal/core/domain"
 	"tunorth-brms-backend/internal/core/ports"
 
@@ -53,6 +54,25 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
 
 // GET /api/users
 func (h *UserHandler) GetAllUsers(c *fiber.Ctx) error {
+	pageStr := c.Query("page")
+	if pageStr != "" {
+		page, _ := strconv.Atoi(pageStr)
+		limit, _ := strconv.Atoi(c.Query("limit"))
+		search := c.Query("search")
+		if page <= 0 {
+			page = 1
+		}
+		if limit <= 0 {
+			limit = 10
+		}
+
+		res, err := h.service.GetPaginatedUsers(page, limit, search)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(res)
+	}
+
 	users, err := h.service.GetAllUsers()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

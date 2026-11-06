@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/authStore";
 import { Booking } from "@/types/booking";
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Pagination } from "@/components/ui/pagination";
 import {
   Dialog,
   DialogContent,
@@ -32,16 +33,28 @@ export default function MyBookingsPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
   // Modal for cancelling recurring series
   const [cancelTargetBooking, setCancelTargetBooking] =
     useState<Booking | null>(null);
   const [isCancelModalOpen, setIsCancelModalOpen] = useState(false);
 
-  const fetchMyBookings = async () => {
+  const fetchMyBookings = useCallback(async () => {
     if (!user) return;
     try {
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.append("user_id", user.user_id.toString());
+      params.append("page", page.toString());
+      params.append("limit", pageSize.toString());
+
       const res = await fetch(
-        `${API_URL}/api/bookings?user_id=${user.user_id}`,
+        `${API_URL}/api/bookings?${params.toString()}`,
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -51,16 +64,23 @@ export default function MyBookingsPage() {
 
       if (res.ok) {
         const data = await res.json();
-        const safeData = Array.isArray(data) ? data : [];
-        const sorted = safeData.sort((a: Booking, b: Booking) => b.id - a.id);
-        setBookings(sorted);
+        if (data && Array.isArray(data.data)) {
+          setBookings(data.data);
+          setTotal(data.total);
+          setTotalPages(data.total_pages);
+        } else if (Array.isArray(data)) {
+          const sorted = data.sort((a: Booking, b: Booking) => b.id - a.id);
+          setBookings(sorted);
+          setTotal(data.length);
+          setTotalPages(1);
+        }
       }
     } catch (error) {
       console.error("Error fetching bookings:", error);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user, token, page, pageSize]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -71,7 +91,7 @@ export default function MyBookingsPage() {
     }
 
     fetchMyBookings();
-  }, [isAuthenticated, router, user, token, isInitialized]);
+  }, [isAuthenticated, router, user, isInitialized, fetchMyBookings]);
 
   const handleCancelClick = (booking: Booking) => {
     if (booking.recurring_group_id) {
@@ -266,6 +286,20 @@ export default function MyBookingsPage() {
               )}
             </TableBody>
           </Table>
+
+          <div className="mt-4 pt-4 border-t border-slate-100">
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalItems={total}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(newSize) => {
+                setPageSize(newSize);
+                setPage(1);
+              }}
+            />
+          </div>
         </div>
       </div>
 

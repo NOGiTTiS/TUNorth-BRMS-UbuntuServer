@@ -1,6 +1,7 @@
 package services_test
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -27,6 +28,38 @@ func (m *mockBookingRepo) CreateBatch(bookings []domain.Booking) error {
 
 func (m *mockBookingRepo) GetAll() ([]domain.Booking, error) {
 	return m.createdBookings, nil
+}
+
+func (m *mockBookingRepo) GetPaginated(params domain.BookingFilterParams) ([]domain.Booking, int64, error) {
+	var filtered []domain.Booking
+	for _, b := range m.createdBookings {
+		if params.UserID != nil && *params.UserID > 0 && b.UserID != *params.UserID {
+			continue
+		}
+		if params.Status != "" && params.Status != "all" && b.Status != params.Status {
+			continue
+		}
+		filtered = append(filtered, b)
+	}
+
+	total := int64(len(filtered))
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+	if offset >= len(filtered) {
+		return []domain.Booking{}, total, nil
+	}
+	end := offset + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return filtered[offset:end], total, nil
 }
 
 func (m *mockBookingRepo) GetByID(id uint) (*domain.Booking, error) {
@@ -131,6 +164,7 @@ func (m *mockUserRepo) GetByUsername(username string) (*domain.User, error)     
 func (m *mockUserRepo) GetByEmail(email string) (*domain.User, error)              { return nil, nil }
 func (m *mockUserRepo) GetByUsernameOrEmail(identifier string) (*domain.User, error) { return nil, nil }
 func (m *mockUserRepo) GetAll() ([]domain.User, error)                             { return nil, nil }
+func (m *mockUserRepo) GetPaginated(page, limit int, search string) ([]domain.User, int64, error) { return nil, 0, nil }
 func (m *mockUserRepo) Update(user *domain.User) error                             { return nil }
 func (m *mockUserRepo) Delete(id uint) error                                       { return nil }
 func (m *mockUserRepo) Count() (int64, error)                                      { return 1, nil }
@@ -152,6 +186,9 @@ func (m *mockLogService) LogAction(userID uint, action, description, ip, userAge
 	return nil
 }
 func (m *mockLogService) GetLogs(limit int) ([]domain.Log, error) { return nil, nil }
+func (m *mockLogService) GetPaginatedLogs(page, limit int, search string) (*domain.PaginatedResult[domain.Log], error) {
+	return nil, nil
+}
 
 func setupBookingService() (ports.BookingService, *mockBookingRepo, *mockSettingService) {
 	bookingRepo := &mockBookingRepo{
@@ -335,5 +372,49 @@ func TestUpdateAndCancelRecurringGroup(t *testing.T) {
 
 	if len(repo.createdBookings) != 0 {
 		t.Errorf("expected 0 bookings after group delete, got %d", len(repo.createdBookings))
+	}
+}
+
+func TestGetPaginatedBookings(t *testing.T) {
+	svc, mockRepo, _ := setupBookingService()
+
+	// Seed 25 bookings
+	for i := 1; i <= 25; i++ {
+		mockRepo.createdBookings = append(mockRepo.createdBookings, domain.Booking{
+			ID:      uint(i),
+			UserID:  1,
+			Subject: fmt.Sprintf("Booking %d", i),
+			Status:  "approved",
+		})
+	}
+
+	// Page 1 with limit 10
+	res, err := svc.GetPaginatedBookings(domain.BookingFilterParams{
+		Page:  1,
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Total != 25 {
+		t.Errorf("expected total 25, got %d", res.Total)
+	}
+	if res.TotalPages != 3 {
+		t.Errorf("expected total_pages 3, got %d", res.TotalPages)
+	}
+	if len(res.Data) != 10 {
+		t.Errorf("expected 10 items on page 1, got %d", len(res.Data))
+	}
+
+	// Page 3 with limit 10 (last page with 5 items)
+	res3, err := svc.GetPaginatedBookings(domain.BookingFilterParams{
+		Page:  3,
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(res3.Data) != 5 {
+		t.Errorf("expected 5 items on page 3, got %d", len(res3.Data))
 	}
 }

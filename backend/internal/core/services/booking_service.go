@@ -116,6 +116,33 @@ func (s *bookingService) GetAllBookings() ([]domain.Booking, error) {
 	return s.repo.GetAll()
 }
 
+func (s *bookingService) GetPaginatedBookings(params domain.BookingFilterParams) (*domain.PaginatedResult[domain.Booking], error) {
+	if params.Page <= 0 {
+		params.Page = 1
+	}
+	if params.Limit <= 0 {
+		params.Limit = 10
+	}
+
+	bookings, total, err := s.repo.GetPaginated(params)
+	if err != nil {
+		return nil, err
+	}
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(params.Limit) - 1) / int64(params.Limit))
+	}
+
+	return &domain.PaginatedResult[domain.Booking]{
+		Data:       bookings,
+		Total:      total,
+		Page:       params.Page,
+		Limit:      params.Limit,
+		TotalPages: totalPages,
+	}, nil
+}
+
 // GetBookingsByRange รับ string มาแปลงเป็น time ก่อนส่งให้ repo
 func (s *bookingService) GetBookingsByRange(startStr, endStr string) ([]domain.Booking, error) {
 	layout := time.RFC3339 

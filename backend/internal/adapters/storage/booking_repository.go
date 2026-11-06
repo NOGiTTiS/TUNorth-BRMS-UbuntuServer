@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"strings"
 	"time"
 	"tunorth-brms-backend/internal/core/domain"
 	"tunorth-brms-backend/internal/core/ports"
@@ -35,6 +36,55 @@ func (r *bookingRepository) GetAll() ([]domain.Booking, error) {
 	var bookings []domain.Booking
 	err := r.db.Preload("User").Preload("Room").Preload("BookingResources.Resource").Find(&bookings).Error
 	return bookings, err
+}
+
+func (r *bookingRepository) GetPaginated(params domain.BookingFilterParams) ([]domain.Booking, int64, error) {
+	tx := r.db.Model(&domain.Booking{})
+
+	if params.UserID != nil && *params.UserID > 0 {
+		tx = tx.Where("bookings.user_id = ?", *params.UserID)
+	}
+
+	if params.Status != "" && params.Status != "all" {
+		tx = tx.Where("LOWER(bookings.status) = ?", strings.ToLower(params.Status))
+	}
+
+	if params.RoomID != nil && *params.RoomID > 0 {
+		tx = tx.Where("bookings.room_id = ?", *params.RoomID)
+	}
+
+	if params.Search != "" {
+		pattern := "%" + params.Search + "%"
+		tx = tx.Joins("LEFT JOIN users ON users.id = bookings.user_id").
+			Joins("LEFT JOIN rooms ON rooms.id = bookings.room_id").
+			Where("bookings.subject ILIKE ? OR users.full_name ILIKE ? OR rooms.room_name ILIKE ?", pattern, pattern, pattern)
+	}
+
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 10
+	}
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	var bookings []domain.Booking
+	err := tx.Preload("User").
+		Preload("Room").
+		Preload("BookingResources.Resource").
+		Order("bookings.id DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&bookings).Error
+
+	return bookings, total, err
 }
 
 func (r *bookingRepository) GetByID(id uint) (*domain.Booking, error) {

@@ -50,7 +50,51 @@ func (h *BookingHandler) GetBookings(c *fiber.Ctx) error {
 		return c.JSON(bookings)
 	}
 
-	// 2. ดึงข้อมูลทั้งหมดมาก่อน (เพื่อเตรียมกรอง)
+	// 2. กรณีเรียกแบบแบ่งหน้า (Pagination)
+	pageStr := c.Query("page")
+	if pageStr != "" {
+		page, _ := strconv.Atoi(pageStr)
+		limit, _ := strconv.Atoi(c.Query("limit"))
+		if page <= 0 {
+			page = 1
+		}
+		if limit <= 0 {
+			limit = 10
+		}
+
+		var uidPtr *uint
+		if userIdStr != "" {
+			if id, err := strconv.Atoi(userIdStr); err == nil && id > 0 {
+				u := uint(id)
+				uidPtr = &u
+			}
+		}
+
+		var roomIDPtr *uint
+		if roomIDStr := c.Query("room_id"); roomIDStr != "" {
+			if id, err := strconv.Atoi(roomIDStr); err == nil && id > 0 {
+				r := uint(id)
+				roomIDPtr = &r
+			}
+		}
+
+		filterParams := domain.BookingFilterParams{
+			Page:   page,
+			Limit:  limit,
+			UserID: uidPtr,
+			RoomID: roomIDPtr,
+			Status: c.Query("status"),
+			Search: c.Query("search"),
+		}
+
+		res, err := h.service.GetPaginatedBookings(filterParams)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(res)
+	}
+
+	// 3. ดึงข้อมูลทั้งหมดมาก่อน (กรณีไม่ได้ระบุหน้า เพื่อคง Backward Compatibility)
 	bookings, err := h.service.GetAllBookings()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})

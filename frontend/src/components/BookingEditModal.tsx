@@ -74,7 +74,11 @@ export default function BookingEditModal({
             fetch(`${API_URL}/api/resources`)
           ]);
           if (roomsRes.ok) {
-            setRooms(await roomsRes.json());
+            const roomsData = await roomsRes.json();
+            const sortedRooms = Array.isArray(roomsData)
+              ? [...roomsData].sort((a, b) => a.id - b.id)
+              : [];
+            setRooms(sortedRooms);
           }
           if (resourcesRes.ok) {
             setResourceOptions(await resourcesRes.json());

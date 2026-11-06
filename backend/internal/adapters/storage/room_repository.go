@@ -22,10 +22,10 @@ func (r *roomRepository) Create(room *domain.Room) error {
 	return r.db.Create(room).Error
 }
 
-// GetAll: ดึงข้อมูลห้องทั้งหมด
+// GetAll: ดึงข้อมูลห้องทั้งหมด (เรียงตาม id จากน้อยไปมาก)
 func (r *roomRepository) GetAll() ([]domain.Room, error) {
 	var rooms []domain.Room
-	err := r.db.Find(&rooms).Error
+	err := r.db.Order("id ASC").Find(&rooms).Error
 	return rooms, err
 }
 

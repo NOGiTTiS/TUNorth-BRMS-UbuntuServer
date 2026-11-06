@@ -35,3 +35,30 @@ func (s *logService) GetLogs(limit int) ([]domain.Log, error) {
 	}
 	return s.repo.GetAll(limit)
 }
+
+func (s *logService) GetPaginatedLogs(page, limit int, search string) (*domain.PaginatedResult[domain.Log], error) {
+	if page <= 0 {
+		page = 1
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	logs, total, err := s.repo.GetPaginated(page, limit, search)
+	if err != nil {
+		return nil, err
+	}
+
+	totalPages := 0
+	if total > 0 {
+		totalPages = int((total + int64(limit) - 1) / int64(limit))
+	}
+
+	return &domain.PaginatedResult[domain.Log]{
+		Data:       logs,
+		Total:      total,
+		Page:       page,
+		Limit:      limit,
+		TotalPages: totalPages,
+	}, nil
+}

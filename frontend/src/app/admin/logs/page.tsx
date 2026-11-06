@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useAuthStore } from "@/store/authStore";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Pagination } from "@/components/ui/pagination";
 import { Search } from "lucide-react";
 import { format } from "date-fns";
 import { API_URL } from "@/config";
@@ -39,6 +40,12 @@ export default function LogsPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
 
+  // Pagination states
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
   useEffect(() => {
     if (!isInitialized) return;
     if (!isAuthenticated || user?.role !== "admin") {
@@ -46,28 +53,43 @@ export default function LogsPage() {
     }
   }, [isAuthenticated, user, router, isInitialized]);
 
-  const fetchLogs = async () => {
+  const fetchLogs = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/logs`, {
+      const params = new URLSearchParams();
+      params.append("page", page.toString());
+      params.append("limit", pageSize.toString());
+      if (searchTerm.trim()) {
+        params.append("search", searchTerm.trim());
+      }
+
+      const res = await fetch(`${API_URL}/api/logs?${params.toString()}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (res.ok) {
         const data = await res.json();
-        setLogs(data);
+        if (data && Array.isArray(data.data)) {
+          setLogs(data.data);
+          setTotal(data.total);
+          setTotalPages(data.total_pages);
+        } else if (Array.isArray(data)) {
+          setLogs(data);
+          setTotal(data.length);
+          setTotalPages(1);
+        }
       }
     } catch (error) {
       console.error("Failed to fetch logs:", error);
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [page, pageSize, searchTerm, token]);
 
   useEffect(() => {
     if (isAuthenticated && user?.role === "admin") {
       fetchLogs();
     }
-  }, [isAuthenticated, user, token]);
+  }, [isAuthenticated, user, fetchLogs]);
 
   const getActionColor = (action: string) => {
     switch (action.toUpperCase()) {
@@ -103,14 +125,7 @@ export default function LogsPage() {
     }
   };
 
-  const filteredLogs = logs.filter(
-    (log) =>
-      (log.user?.username || "System").toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.action.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      log.description.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  if (isLoading || !isInitialized) {
+  if (!isInitialized || (isLoading && logs.length === 0 && !searchTerm)) {
     return (
       <div className="p-10 text-center text-slate-500">กำลังโหลดข้อมูล...</div>
     );
@@ -130,15 +145,13 @@ export default function LogsPage() {
             <Input
               placeholder="ค้นหาชื่อ, กิจกรรม, หรือรายละเอียด..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
               className="w-full border border-gray-200 rounded-xl focus-visible:ring-2 focus-visible:ring-tu-pink focus-visible:border-tu-pink focus-visible:ring-offset-0 shadow-sm transition-all"
             />
-            <Button className="bg-tu-pink hover:bg-tu-pink-hover text-white rounded-xl">
-              <Search className="w-4 h-4 mr-2" />
-              ค้นหา
-            </Button>
           </div>
-          <div className="text-sm text-slate-500">แสดง 100 รายการล่าสุด</div>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border">
@@ -162,8 +175,8 @@ export default function LogsPage() {
                       กำลังโหลดข้อมูล...
                     </TableCell>
                   </TableRow>
-                ) : filteredLogs.length > 0 ? (
-                  filteredLogs.map((log) => (
+                ) : logs.length > 0 ? (
+                  logs.map((log) => (
                     <TableRow key={log.ID}>
                       <TableCell className="text-slate-500 font-mono text-xs">
                         {format(
@@ -215,6 +228,20 @@ export default function LogsPage() {
                 )}
               </TableBody>
             </Table>
+          </div>
+
+          <div className="mt-4 pt-2">
+            <Pagination
+              currentPage={page}
+              totalPages={totalPages}
+              totalItems={total}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(newSize) => {
+                setPageSize(newSize);
+                setPage(1);
+              }}
+            />
           </div>
         </CardContent>
       </Card>

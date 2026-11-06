@@ -50,6 +50,31 @@ func (r *userRepository) GetAll() ([]domain.User, error) {
 	return users, err
 }
 
+func (r *userRepository) GetPaginated(page, limit int, search string) ([]domain.User, int64, error) {
+	tx := r.db.Model(&domain.User{})
+	if search != "" {
+		pattern := "%" + search + "%"
+		tx = tx.Where("username ILIKE ? OR full_name ILIKE ? OR email ILIKE ? OR department ILIKE ?", pattern, pattern, pattern, pattern)
+	}
+
+	var total int64
+	if err := tx.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	if limit <= 0 {
+		limit = 10
+	}
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	var users []domain.User
+	err := tx.Omit("password").Order("id DESC").Offset(offset).Limit(limit).Find(&users).Error
+	return users, total, err
+}
+
 func (r *userRepository) Update(user *domain.User) error {
 	return r.db.Save(user).Error
 }
